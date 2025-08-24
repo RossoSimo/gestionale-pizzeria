@@ -4,6 +4,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    /* Prevent the root page from scrolling; internal scrollable regions (like the cart) remain scrollable */
+    html, body, #root {
+      height: 100%;
+      overflow: hidden;
+      margin: 0;
+    }
+    /* Enable smooth touch scrolling for internal scrollable elements */
+    .scrollable { -webkit-overflow-scrolling: touch; }
+  /* Animated buttons */
+  .btn-animated { transition: transform 120ms ease, box-shadow 120ms ease; }
+  .btn-animated:active { transform: translateY(2px) scale(0.995); }
+  .btn-animated .ico { width: 18px; height: 18px; margin-right: 8px; vertical-align: -3px; }
+
+  /* modal fade */
+  .modal.show .modal-dialog { transform: translateY(-8px); transition: transform 180ms ease; }
+  .modal-backdrop.show { opacity: 0.5; }
+  </style>
 </head>
 
 <body>

@@ -1,0 +1,199 @@
+/* Minimal modern theme overrides for the app */
+/* Local Poppins font - your TTF files are fine; CSS points to local TTFs present in app/assets/fonts */
+@font-face{
+  font-family: 'PoppinsLocal';
+  src: url('../../assets/fonts/Poppins-Regular.ttf') format('truetype');
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face{
+  font-family: 'PoppinsLocal';
+  src: url('../../assets/fonts/Poppins-Medium.ttf') format('truetype');
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face{
+  font-family: 'PoppinsLocal';
+  src: url('../../assets/fonts/Poppins-SemiBold.ttf') format('truetype');
+  font-weight: 600; font-style: normal; font-display: swap;
+}
+@font-face{
+  font-family: 'PoppinsLocal';
+  src: url('../../assets/fonts/Poppins-Bold.ttf') format('truetype');
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+
+:root{
+  --app-bg: #f6f7fb;
+  --surface: #ffffff;
+  --muted: #6c757d;
+  --accent: #2563eb; /* gentle blue */
+  --accent-strong: #1e40af;
+  --radius: 10px;
+}
+
+html,body,#root{ background: var(--app-bg); }
+body{ font-family: 'PoppinsLocal', Poppins, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: #111827; -webkit-font-smoothing:antialiased; }
+
+/* Topbar */
+.app-topbar{ background: transparent !important; border-bottom: none !important; height:56px; }
+.app-topbar .navbar-brand{ font-weight:600; font-size:1rem; color:#0f172a; }
+
+/* Sidebar */
+.app-sidebar{ background: rgba(15,23,42,0.02) !important; border-right: 1px solid rgba(15,23,42,0.04); display:flex; align-items:flex-start; padding-top:12px; width:50px; flex: 0 0 50px; transition: background .18s ease, border-color .18s ease }
+.app-sidebar .d-flex{ gap:8px; flex-direction:column; align-items:center; width:100% }
+.app-sidebar .btn{ width:40px; height:40px; border-radius:10px; display:inline-flex; align-items:center; justify-content:center; background:transparent; border:1px solid transparent; color:var(--muted); padding:0; margin-left:auto; margin-right:auto }
+.app-sidebar .btn:hover{ background:rgba(15,23,42,0.03); color:var(--accent-strong); }
+.app-sidebar:hover{ background: rgba(15,23,42,0.035) !important; border-right-color: rgba(15,23,42,0.06) }
+.app-sidebar .btn.btn-primary{ background:linear-gradient(180deg,var(--accent),var(--accent-strong)); border:none; color:white; box-shadow:0 6px 18px rgba(15,23,42,0.08); }
+
+/* Cards and panels */
+.card{ border:none; background:var(--surface); border-radius:var(--radius); box-shadow:0 8px 20px rgba(15,23,42,0.04); }
+.card .card-body{ padding:1rem; }
+
+/* List group items - subtle and rounded */
+.list-group-item{ border:none; background:transparent; padding:0.35rem 0.5rem; }
+.list-group-item.bg-light{ background:transparent; color:var(--muted); font-size:0.75rem; padding-top:0.6rem }
+
+/* Buttons - softer primary and outlines */
+.btn-primary{ background: var(--accent) !important; border-color: var(--accent) !important; box-shadow:none; }
+.btn-outline-secondary{ border-color: rgba(15,23,42,0.06) !important; color:var(--muted); background:transparent; }
+.btn-animated{ border-radius:10px }
+
+/* Category filter buttons (bigger, touch-friendly) */
+.category-filter-btn{
+  padding: 10px 14px;
+  min-width: 84px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+.category-filter-btn i{ margin-right:8px }
+
+/* Menu item card styles */
+.menu-item-btn{
+  padding: 16px 12px;
+  border-radius: 14px;
+  text-align: center;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+  position: relative;
+  overflow: hidden;
+}
+.menu-item-btn:hover, .menu-item-btn:active{
+  transform: translateY(-3px);
+  box-shadow: 0 10px 26px rgba(15,23,42,0.09);
+}
+.menu-item-name{ font-weight:700; font-size:1rem; margin-bottom:4px; }
+.menu-item-price{ color:var(--muted); font-size:0.95rem; }
+.menu-item-price-badge{ position:absolute; top:8px; left:8px; background:rgba(255,255,255,0.95); padding:6px 8px; border-radius:10px; font-weight:700; box-shadow:0 6px 14px rgba(15,23,42,0.06); }
+
+/* long-press visual feedback */
+.menu-item-btn.pressing{
+  transform: scale(0.995);
+}
+
+/* SVG long-press progress ring */
+/* ring visibility & fade timings: visible for ~240ms, fade of ~180ms */
+.lp-ring{ position:absolute; width:64px; height:64px; opacity:0; pointer-events:none; transition: opacity 180ms linear, transform 120ms ease; z-index:2000; transform: translate(-50%,-50%) scale(.98); }
+/* center the ring roughly on the thumbnail area (thumbnail has padding 12px left in markup) */
+.menu-item-btn .lp-ring{ position:absolute; transform-origin: center; }
+.lp-ring svg{ width:100%; height:100%; transform: rotate(-90deg); display:block }
+.lp-ring .track{ fill:none; stroke:rgba(15,23,42,0.06); stroke-width:4 }
+.lp-ring .progress{ fill:none; stroke: rgba(37,99,235,0.95); stroke-width:4; stroke-linecap:round; stroke-dasharray: 113.097; stroke-dashoffset: 113.097; }
+/* only reveal and animate when the ring has the visible class (set after a short delay) */
+.lp-ring.visible{ opacity:1; transform: translate(-50%,-50%) scale(1); }
+.lp-ring.visible .progress{ transition: stroke-dashoffset 450ms linear; stroke-dashoffset: 0; }
+
+/* thumbnail inside card */
+.menu-item-thumb{ width:56px; height:56px; border-radius:10px; object-fit:cover; box-shadow:0 6px 12px rgba(15,23,42,0.06); }
+.menu-item-content{ padding-right: 8px }
+
+/* Make buttons touch-friendlier on small screens */
+@media (max-width: 576px){
+  .menu-item-icon{ width:68px; height:68px; font-size:20px }
+  .menu-item-name{ font-size:1.05rem }
+}
+
+/* Product modal styles */
+.product-modal-image{ width:120px; height:120px; border-radius:12px; object-fit:cover; display:block; margin:0 auto 12px auto; box-shadow:0 8px 20px rgba(15,23,42,0.08); }
+.product-modal .modal-body{ display:flex; gap:16px; flex-direction:column; }
+.ingredients-list{ display:flex; flex-direction:column; gap:8px; max-height:240px; overflow:auto; padding-right:6px }
+.ingredient-item{ display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; background:linear-gradient(180deg,#ffffff,#fbfbfd); border:1px solid rgba(15,23,42,0.04); }
+.ingredient-item input[type="text"]{ border:none; background:transparent; width:100%; padding:0; }
+.ingredient-actions{ display:flex; gap:6px; }
+.ingredient-add-row{ display:flex; gap:8px; margin-top:8px }
+.allergens-badges .badge{ margin-right:6px }
+
+/* Make search field match category buttons size */
+.category-search{
+  height: 44px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  min-width: 140px;
+  font-weight:600;
+}
+
+/* Toolbar layout stability */
+.category-toolbar .btn-group{ flex: 0 0 auto; }
+.category-toolbar .category-search{ flex: 1 1 240px; min-width: 120px; }
+.category-toolbar{ gap:12px }
+
+/* Keep category filter buttons on a single line to avoid layout shifts when labels change */
+.category-toolbar{ align-items: center; }
+.category-toolbar .btn-group{
+  display:flex;
+  white-space: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.category-toolbar .btn-group::-webkit-scrollbar{ display:none }
+.category-filter-btn{ flex: 0 0 auto; white-space: nowrap; }
+
+/* Ensure main content and aside don't shrink unexpectedly */
+main.flex-fill{ min-width: 0 }
+/* Cart panel width: wider for better display */
+aside{ flex: 0 0 420px; max-width: 420px }
+
+@media (max-width: 900px) {
+  aside{ flex: 0 0 320px; max-width: 320px }
+}
+
+/* Labels for tall inputs: vertically center and reduce margin */
+.category-label{ display:flex; align-items:center; height:44px; margin-bottom:0; color:inherit; font-weight:500; }
+
+/* Labels - less invasive: smaller, muted and lighter weight */
+.form-label{ color: #6b7280; font-size: 0.85rem; font-weight:500; margin-bottom:0.25rem; }
+.form-label.small{ font-size:0.8rem; color: #6b7280; font-weight:500; opacity:0.95 }
+/* Keep white labels but make them subtler on dark backgrounds */
+.form-label.text-white{ color: rgba(255,255,255,0.66) !important; font-weight:500 }
+
+/* Inputs */
+.form-control, .form-select{ border-radius:10px; box-shadow:none; border:1px solid rgba(15,23,42,0.06); }
+
+/* Make the cart area more modern */
+aside .card{ height:100%; display:flex; flex-direction:column }
+aside .card .card-body{ display:flex; flex-direction:column; gap:12px; }
+
+/* Prevent horizontal scrolling inside the cart list: ensure flex children can shrink and long text wraps */
+aside .card .card-body .list-group{ overflow-x: hidden; }
+.list-group-item{ min-width: 0; box-sizing: border-box; }
+.list-group-item > div{ min-width: 0; }
+.list-group-item .fw-bold, .list-group-item .text-muted, .list-group-item .small{ word-break: break-word; overflow-wrap: anywhere; }
+
+/* Make sections breathe */
+.container-fluid{ padding:0; }
+
+/* Small helpers */
+.small.text-muted{ color: #6b7280 !important }
+
+/* highlight animation for edited cart rows */
+.list-group-item.edited{ animation: editedFlash 600ms cubic-bezier(.22,.9,.26,1) forwards }
+@keyframes editedFlash{
+  0% { background: rgba(37,99,235,0.14); box-shadow: 0 8px 24px rgba(37,99,235,0.10); transform: translateY(-2px) scale(1.01); }
+  50% { background: rgba(37,99,235,0.08); transform: translateY(0) scale(1); }
+  100% { background: transparent; box-shadow: none; transform: none }
+}
+
+/* Modal tweaks */
+.modal-content{ border-radius:12px; overflow:hidden }
+
+@media (max-width: 1024px){
+  .app-sidebar{ width:56px !important; flex: 0 0 56px }
+}

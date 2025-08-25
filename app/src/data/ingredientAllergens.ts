@@ -1,0 +1,17 @@
+export const INGREDIENT_ALLERGENS: Record<string, string[]> = {
+  Mozzarella: ['Latticini'],
+  Formaggio: ['Latticini'],
+  Salame: [],
+  Pomodoro: [],
+  Basilico: [],
+  Aglio: [],
+  Patate: [],
+  Olio: [],
+  Olive: [],
+  Zucchero: [],
+  Caffeina: ['Caffeina'],
+  Acqua: [],
+  Farina: ['Glutine'],
+  Uova: ['Uova'],
+  Latte: ['Latticini'],
+}

@@ -7,6 +7,7 @@ import SettingsPage from './pages/SettingsPage'
 
 function App() {
     const [page, setPage] = useState<'orders' | 'statistics' | 'settings'>('orders')
+    const [viewMode, setViewMode] = useState<'banco' | 'lista'>('banco')
 
     const titles: Record<string, string> = {
         orders: 'Ordini',
@@ -18,9 +19,9 @@ function App() {
         <div className="d-flex" style={{ height: '100%' }}>
             <Sidebar current={page} onChange={(p) => setPage(p)} />
             <div className="flex-fill d-flex flex-column">
-                <Topbar title={titles[page]} />
+                <Topbar title={titles[page]} page={page} viewMode={viewMode} setViewMode={setViewMode} />
                 <div className="flex-fill overflow-auto">
-                    {page === 'orders' && <OrderPage />}
+                    {page === 'orders' && <OrderPage viewMode={viewMode} />}
                     {page === 'statistics' && <StatisticsPage />}
                     {page === 'settings' && <SettingsPage />}
                 </div>

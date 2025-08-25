@@ -7,7 +7,7 @@ type Props = {
 
 export default function Sidebar({ current, onChange }: Props) {
   return (
-    <aside className="bg-light border-end" style={{ width: 84 }}>
+    <aside className="app-sidebar bg-light border-end" style={{ width: 64 }}>
       <div className="d-flex flex-column align-items-center py-3">
         <button className={`btn mb-2 ${current === 'orders' ? 'btn-primary' : 'btn-outline-secondary'}`} title="Ordini" onClick={() => onChange('orders')}>
           <i className="bi bi-shop" style={{ fontSize: 20 }}></i>

@@ -74,6 +74,165 @@ ipcMain.handle('db:getOrders', async () => {
   }
 })
 
+// provide menu, categories, ingredients, additions, customers to renderer
+ipcMain.handle('db:getMenu', async () => {
+  try {
+    const rows = await prisma.menu.findMany({ include: { ingredients: true, category: true } })
+    return { success: true, result: rows }
+  } catch (e) {
+    console.error('ipc db:getMenu error', e)
+    return { success: false, error: String(e), result: [] }
+  }
+})
+
+ipcMain.handle('db:getCategories', async () => {
+  try {
+    const rows = await prisma.category.findMany()
+    return { success: true, result: rows }
+  } catch (e) {
+    console.error('ipc db:getCategories error', e)
+    return { success: false, error: String(e), result: [] }
+  }
+})
+
+ipcMain.handle('db:getIngredients', async () => {
+  try {
+    const rows = await prisma.ingredient.findMany()
+    return { success: true, result: rows }
+  } catch (e) {
+    console.error('ipc db:getIngredients error', e)
+    return { success: false, error: String(e), result: [] }
+  }
+})
+
+// Note: Addition model removed from renderer surface; additions handled inline or via menu extras
+
+ipcMain.handle('db:getCustomers', async () => {
+  try {
+    const rows = await prisma.customer.findMany({ orderBy: { name: 'asc' } })
+    return { success: true, result: rows }
+  } catch (e) {
+    console.error('ipc db:getCustomers error', e)
+    return { success: false, error: String(e), result: [] }
+  }
+})
+
+// Customers CRUD
+ipcMain.handle('db:createCustomer', async (_, data) => {
+  try {
+    const created = await prisma.customer.create({ data: { name: data.name, phone: data.phone ?? null, address: data.address ?? null } })
+    return { success: true, result: created }
+  } catch (e) {
+    console.error('ipc db:createCustomer error', e)
+    return { success: false, error: String(e) }
+  }
+})
+
+ipcMain.handle('db:updateCustomer', async (_, data) => {
+  try {
+    const updated = await prisma.customer.update({ where: { id: data.id }, data: { name: data.name, phone: data.phone ?? null, address: data.address ?? null } })
+    return { success: true, result: updated }
+  } catch (e) {
+    console.error('ipc db:updateCustomer error', e)
+    return { success: false, error: String(e) }
+  }
+})
+
+ipcMain.handle('db:deleteCustomer', async (_, id) => {
+  try {
+    await prisma.customer.delete({ where: { id } })
+    return { success: true }
+  } catch (e) {
+    console.error('ipc db:deleteCustomer error', e)
+    return { success: false, error: String(e) }
+  }
+})
+
+// Ingredients CRUD
+ipcMain.handle('db:createIngredient', async (_, data) => {
+  try {
+    const created = await prisma.ingredient.create({ data: { name: data.name, add_price: data.add_price ?? 0 } })
+    return { success: true, result: created }
+  } catch (e) {
+    console.error('ipc db:createIngredient error', e)
+    return { success: false, error: String(e) }
+  }
+})
+
+ipcMain.handle('db:updateIngredient', async (_, data) => {
+  try {
+    const updated = await prisma.ingredient.update({ where: { id: data.id }, data: { name: data.name, add_price: data.add_price ?? 0 } })
+    return { success: true, result: updated }
+  } catch (e) {
+    console.error('ipc db:updateIngredient error', e)
+    return { success: false, error: String(e) }
+  }
+})
+
+ipcMain.handle('db:deleteIngredient', async (_, id) => {
+  try {
+    await prisma.ingredient.delete({ where: { id } })
+    return { success: true }
+  } catch (e) {
+    console.error('ipc db:deleteIngredient error', e)
+    return { success: false, error: String(e) }
+  }
+})
+
+// Menu CRUD (menu includes optional ingredients relation)
+ipcMain.handle('db:createMenu', async (_, data) => {
+  try {
+    // data.ingredients is expected to be array of ingredient names or ids
+  const connect = (data.ingredients || []).map((i: any) => ({ id: String(i) }))
+    const created = await prisma.menu.create({ data: {
+      name: data.name,
+      description: data.description ?? null,
+      price: data.price || 0,
+      categoryId: data.categoryId ?? null,
+      image: data.image ?? null,
+      ingredients: { connect: connect }
+    }, include: { ingredients: true, category: true } })
+    return { success: true, result: created }
+  } catch (e) {
+    console.error('ipc db:createMenu error', e)
+    return { success: false, error: String(e) }
+  }
+})
+
+ipcMain.handle('db:updateMenu', async (_, data) => {
+  try {
+    // replace ingredients relation if provided
+    const updateData: any = { name: data.name, description: data.description ?? null, price: data.price || 0, categoryId: data.categoryId ?? null, image: data.image ?? null }
+    if (Array.isArray(data.ingredients)) {
+      updateData.ingredients = { set: [], connect: (data.ingredients || []).map((i: any) => ({ id: String(i) })) }
+    }
+    const updated = await prisma.menu.update({ where: { id: data.id }, data: updateData, include: { ingredients: true, category: true } })
+    return { success: true, result: updated }
+  } catch (e) {
+    console.error('ipc db:updateMenu error', e)
+    return { success: false, error: String(e) }
+  }
+})
+
+ipcMain.handle('db:deleteMenu', async (_, id) => {
+  try {
+    await prisma.menu.delete({ where: { id } })
+    return { success: true }
+  } catch (e) {
+    console.error('ipc db:deleteMenu error', e)
+    return { success: false, error: String(e) }
+  }
+})
+
+// expose app path for resolving local image files in renderer
+ipcMain.handle('app:getAppPath', async () => {
+  try {
+    return { success: true, result: app.getAppPath() }
+  } catch (e) {
+    return { success: false, error: String(e) }
+  }
+})
+
 ipcMain.handle('db:clearOrders', async () => {
   try {
     await prisma.order.deleteMany()

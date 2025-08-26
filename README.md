@@ -11,4 +11,3 @@ Gestionale pizzeria, Electron
 - Statistiche pizzeria
 - note su singola pizza
 - controllo ingredienti ( es. 10 patatose in un orario !! )
-- pizze suggerite per cliente

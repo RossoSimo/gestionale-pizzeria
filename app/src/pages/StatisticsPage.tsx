@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { CartItem } from '../data/types'
+import { OrderRow } from '../types/db'
 import { getOrdersCached, clearOrdersCache } from '../utils/ordersCache'
 import {
   Chart as ChartJS,
@@ -26,8 +27,6 @@ function filterByRange(orders: Order[], range: 'day' | 'week' | 'month' | 'all')
   })
 }
 
-type DbOrder = { id: string; createdAt: Date | string; items?: CartItem[]; customerName?: string; subtotal?: number }
-
 export default function StatisticsPage() {
   const [range, setRange] = useState<'day' | 'week' | 'month' | 'all'>('week')
   const [reloadKey, setReloadKey] = useState(0)
@@ -41,7 +40,7 @@ export default function StatisticsPage() {
         const res = await window.api.getOrders()
         if (res && res.success) {
           const dbOrders = res.result || []
-          const normalized = (dbOrders || []).map((o: DbOrder) => ({ ...o, createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : '' }))
+          const normalized = (dbOrders || []).map((o: OrderRow) => ({ ...o, createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : '' }))
           if (mounted) setOrders(normalized as Order[])
         } else {
           const cached = getOrdersCached() as unknown as Order[]

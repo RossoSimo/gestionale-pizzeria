@@ -1,7 +1,6 @@
 import React, { useMemo, useState, useRef } from 'react'
-import { MENU } from '../data/menu'
+import { MenuRow, IngredientRow, CustomerRow } from '../types/db'
 import { INGREDIENT_ALLERGENS } from '../data/ingredientAllergens'
-import { INITIAL_CUSTOMERS } from '../data/customers'
 import { MenuItem, CartItem, Order, Customer } from '../data/types'
 
 export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' }) {
@@ -13,7 +12,10 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
     // core UI state
     const [cart, setCart] = useState<CartItem[]>([])
     const [selectedProduct, setSelectedProduct] = useState<MenuItem | null>(null)
-    const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS)
+    const [customers, setCustomers] = useState<Customer[]>([])
+    const [menu, setMenu] = useState<MenuItem[]>([])
+    const [ingredientsList, setIngredientsList] = useState<string[]>([])
+    const [categories, setCategories] = useState<string[]>([])
     const [orders, setOrders] = useState<Order[]>([])
     const [editingCartKey, setEditingCartKey] = useState<string | null>(null)
     const [lastEditedId, setLastEditedId] = useState<string | null>(null)
@@ -69,7 +71,7 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
     function startEditCartItem(cartId: string) {
         const ci = cart.find((c) => c.id === cartId)
         if (!ci) return
-        const product = MENU.find((p) => p.id === ci.productId)
+    const product = menu.find((p) => p.id === ci.productId)
         if (!product) return
         setEditingCartKey(cartId)
         setSelectedProduct(product)
@@ -278,6 +280,72 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
         return () => document.removeEventListener('click', onDocClick)
     }, [])
 
+    // load menu, ingredients, categories, additions and customers from DB on mount
+    React.useEffect(() => {
+        let mounted = true
+        ;(async () => {
+            try {
+                const appPathRes = await window.api.getAppPath()
+                const basePath = (appPathRes && appPathRes.success && typeof appPathRes.result === 'string') ? String(appPathRes.result) : ''
+
+                const [menuRes, ingRes, catRes, custRes] = await Promise.all([
+                    window.api.getMenu(),
+                    window.api.getIngredients(),
+                    window.api.getCategories(),
+                    window.api.getCustomers(),
+                ])
+
+                if (menuRes && menuRes.success) {
+                    const normalized = (menuRes.result || []).map((mRaw: unknown) => {
+                        const m = mRaw as MenuRow
+                        const imgField = m.image ?? ''
+                        const resolvedImage = (() => {
+                            const img = imgField
+                            if (!img) return ''
+                            const s = String(img)
+                            if (s.startsWith('data:') || s.startsWith('http://') || s.startsWith('https://')) return s
+                            if (basePath) {
+                                const path = basePath.endsWith('/') ? basePath + s : basePath + '/' + s
+                                return 'file://' + path.replace(/\\/g, '/')
+                            }
+                            return s
+                        })()
+                        return {
+                            id: m.id,
+                            name: m.name,
+                            price: m.price,
+                            category: m.category?.name ?? (m.categoryId ? String(m.categoryId) : ''),
+                            description: m.description ?? '',
+                            image: resolvedImage,
+                            allergens: m.allergens ?? [],
+                            ingredients: Array.isArray(m.ingredients) ? m.ingredients.map((i) => i.name) : [],
+                        }
+                    })
+                    if (mounted) setMenu(normalized as MenuItem[])
+                }
+
+                if (ingRes && ingRes.success) {
+                    const names = ((ingRes.result || []) as unknown as { name: string }[]).map((i) => String(i.name))
+                    if (mounted) setIngredientsList(names)
+                }
+
+                if (catRes && catRes.success) {
+                    if (mounted) setCategories(((catRes.result || []) as unknown as { name: string }[]).map((c) => String(c.name)))
+                }
+
+
+                if (custRes && custRes.success) {
+                    if (mounted) setCustomers((custRes.result || []) as Customer[])
+                }
+            } catch (e) {
+                console.error('Failed loading DB data for frontend', e)
+            }
+        })()
+        return () => { mounted = false }
+    }, [])
+
+    // image resolution is handled inline where needed (uses app.getAppPath via preload)
+
     // load existing orders from DB on mount
     React.useEffect(() => {
         let mounted = true
@@ -391,7 +459,7 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
         // If selectedIngredients is undefined it means "use product defaults" -> no diff
         if (ci.selectedIngredients === undefined) return null
 
-        const product = MENU.find((p) => p.id === ci.productId)
+    const product = menu.find((p) => p.id === ci.productId)
         const defaults = product?.ingredients ?? []
         const selected = ci.selectedIngredients
         const added = (selected || []).filter((s) => !defaults.includes(s))
@@ -424,9 +492,9 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
     // item search and category filter (shown above the items)
     const [itemQuery, setItemQuery] = useState<string>('')
     const [activeItemCategory, setActiveItemCategory] = useState<string>('Tutti')
-    const itemCategories = useMemo(() => ['Tutti', ...Array.from(new Set(MENU.map((m) => m.category)))], [])
+    const itemCategories = useMemo(() => ['Tutti', ...Array.from(new Set(menu.map((m: MenuItem) => m.category)))], [menu])
 
-    const filtered = MENU.filter((m) => {
+    const filtered = menu.filter((m: MenuItem) => {
         const matchesCategory = activeItemCategory === 'Tutti' || m.category === activeItemCategory
         const matchesQuery = m.name.toLowerCase().includes(itemQuery.trim().toLowerCase())
         return matchesCategory && matchesQuery
@@ -818,7 +886,7 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
                                     <div className="small text-muted mb-1">Suggeriti per {customers.find(c => c.id === selectedCustomerId)?.name}</div>
                                     <div className="d-flex" style={{ gap: 8, overflowX: 'auto', paddingBottom: 6 }}>
                                         {topProductsForCustomer.map((t) => {
-                                            const item = MENU.find(m => m.id === t.itemId)
+                                            const item = menu.find((m: MenuItem) => m.id === t.itemId)
                                             if (!item) return null
                                             return (
                                                 <button key={t.itemId} className="btn btn-light btn-sm d-flex align-items-center" onClick={() => addToCart(item, item.ingredients ?? [])}>

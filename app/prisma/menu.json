@@ -1,0 +1,7 @@
+[
+  { "id": "p1", "name": "Margherita", "category": "Pizza", "ingredients": ["Pomodoro", "Mozzarella", "Basilico"], "price": 6.5 },
+  { "id": "p2", "name": "Marinara", "category": "Pizza", "ingredients": ["Pomodoro", "Aglio", "Origano"], "price": 6.0 },
+  { "id": "p3", "name": "Diavola", "category": "Pizza", "ingredients": ["Salame", "Mozzarella", "Pomodoro"], "price": 8.0 },
+  { "id": "e1", "name": "Porzione patatine", "category": "Extra", "ingredients": ["Patate", "Olio"], "price": 3.0 },
+  { "id": "d1", "name": "Acqua 0.5L", "category": "Bevande", "ingredients": [], "price": 1.0 }
+]

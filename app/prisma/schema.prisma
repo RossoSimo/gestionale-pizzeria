@@ -8,16 +8,52 @@ datasource db {
 }
 
 model Order {
-  id         String   @id @default(cuid())
-  createdAt  DateTime @default(now())
-  date       DateTime @default(now())
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  date         DateTime @default(now())
   customerName String
-  customerId String?
-  time       String
-  isDelivery Boolean
-  phone      String?
-  address    String?
-  notes      String?
-  items      String   // store json string of items
-  subtotal   Float
+  customerId   String?
+  time         String
+  isDelivery   Boolean
+  phone        String?
+  address      String?
+  notes        String?
+  items        String // store json string of items
+  subtotal     Float
+}
+
+model Customer {
+  id      String  @id @default(cuid())
+  name    String
+  phone   String?
+  address String?
+}
+
+model Ingredient {
+  id        String @id @default(cuid())
+  name      String @unique
+  add_price Float  @default(0)
+  production_cost Float @default(0)
+  menus     Menu[]
+}
+
+
+model Category {
+  id    String @id @default(cuid())
+  name  String @unique
+  slug  String @unique
+  menus Menu[]
+}
+
+model Menu {
+  id          String       @id @default(cuid())
+  name        String
+  description String?
+  price       Float
+  categoryId  String?
+  category    Category?    @relation(fields: [categoryId], references: [id])
+  // many-to-many implicit relation to Ingredient
+  ingredients Ingredient[]
+  // optional stored image path/URL
+  image       String?
 }

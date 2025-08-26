@@ -9,11 +9,12 @@ export type MenuItem = {
   ingredients?: string[]
 }
 
-export type CartItem = MenuItem & { qty: number; selectedIngredients?: string[]; productId?: string }
+export type CartItem = MenuItem & { qty: number; selectedIngredients?: string[]; productId?: string; note?: string }
 
 export type Order = {
   id: string
   createdAt: string
+  date?: string
   customerName: string
   customerId?: string
   time: string

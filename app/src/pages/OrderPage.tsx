@@ -8,6 +8,7 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
 
     const [productIngredients, setProductIngredients] = useState<string[]>([])
     const [newIngredientText, setNewIngredientText] = useState<string>('')
+    const [productNote, setProductNote] = useState<string>('')
 
     // core UI state
     const [cart, setCart] = useState<CartItem[]>([])
@@ -33,6 +34,10 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
     const [notes, setNotes] = useState<string>('')
     const [isDelivery, setIsDelivery] = useState<boolean>(false)
     const [time, setTime] = useState<string>('')
+    // date for the order (pickup/delivery date) - default today
+    const todayISODate = new Date().toISOString().slice(0, 10)
+    const [date, setDate] = useState<string>(todayISODate)
+    const [toast, setToast] = useState<{ message: string; type?: 'info' | 'success' | 'error'; visible: boolean }>({ message: '', type: 'info', visible: false })
 
     // viewMode is received from parent App (Topbar controls it)
 
@@ -58,6 +63,7 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
     function openProductModal(m: MenuItem) {
         setSelectedProduct(m)
         setProductIngredients(m.ingredients ?? [])
+    setProductNote('')
     }
 
     function startEditCartItem(cartId: string) {
@@ -67,6 +73,7 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
         if (!product) return
         setEditingCartKey(cartId)
         setSelectedProduct(product)
+    setProductNote(ci.note ?? '')
         // if undefined -> defaults, if [] -> explicit none
         if (ci.selectedIngredients === undefined) {
             setProductIngredients(product.ingredients ?? [])
@@ -77,7 +84,8 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
 
     function saveEditedCartItem(product: MenuItem | null, selectedIngredients: string[]) {
         if (!product || !editingCartKey) return
-        const normalizedSelected = (selectedIngredients || []).slice()
+        // For drinks, always use defaults and disallow customizations
+        const normalizedSelected = (product.category === 'Bevande') ? (product.ingredients ?? []).slice() : (selectedIngredients || []).slice()
 
         const defaultIngredients = product.ingredients ?? []
         const arraysEqual = (a: string[] = [], b: string[] = []) => {
@@ -88,8 +96,10 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
             return true
         }
         const isSameAsDefault = arraysEqual(normalizedSelected, defaultIngredients)
-        const suffix = normalizedSelected.length ? normalizedSelected.slice().sort().join('|') : '__NONE__'
-        const newKey = isSameAsDefault ? product.id : `${product.id}::${suffix}`
+    // incorporate the note into the key so items with different notes don't merge
+    const noteSuffix = productNote.trim() ? `::note:${productNote.trim().replace(/::/g, ' ')}` : ''
+    const suffix = normalizedSelected.length ? normalizedSelected.slice().sort().join('|') : '__NONE__'
+    const newKey = (isSameAsDefault ? product.id : `${product.id}::${suffix}`) + noteSuffix
 
         setCart((prev) => {
             const foundIdx = prev.findIndex((p) => p.id === editingCartKey)
@@ -118,6 +128,7 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
                 productId: product.id,
                 qty: original.qty,
                 selectedIngredients: isSameAsDefault ? undefined : (normalizedSelected.length ? normalizedSelected.slice() : []),
+                note: productNote.trim() ? productNote.trim() : undefined,
             }
             return [cartItem, ...removed]
         })
@@ -239,11 +250,17 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
     // compute allergens dynamically from the currently selected ingredients
     const computedAllergens = React.useMemo(() => {
         if (!selectedProduct) return [] as string[]
-        const selected = productIngredients ?? []
         const set = new Set<string>()
-        for (const ing of selected) {
-            const als = INGREDIENT_ALLERGENS[ing]
-            if (als && als.length) als.forEach((a) => set.add(a))
+        if (selectedProduct.category === 'Pizza') {
+            // for pizzas compute allergens dynamically from selected ingredients only
+            const selected = productIngredients ?? []
+            for (const ing of selected) {
+                const als = INGREDIENT_ALLERGENS[ing]
+                if (als && als.length) als.forEach((a) => set.add(a))
+            }
+        } else {
+            // for non-pizza items show declared allergens
+            (selectedProduct.allergens || []).forEach((a) => set.add(a))
         }
         return Array.from(set)
     }, [selectedProduct, productIngredients])
@@ -259,6 +276,38 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
         }
         document.addEventListener('click', onDocClick)
         return () => document.removeEventListener('click', onDocClick)
+    }, [])
+
+    // load existing orders from DB on mount
+    React.useEffect(() => {
+        let mounted = true
+        ;(async () => {
+            try {
+                const res = await window.api.getOrders()
+                if (res && res.success) {
+                    const dbOrders = res.result || []
+                    type Row = { id: string; createdAt?: string | Date; date?: string | Date; items?: unknown[] }
+                    const normalized = (dbOrders as Row[]).map((o) => ({ ...o, createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : '', date: o.date ? (typeof o.date === 'string' ? new Date(o.date).toISOString().slice(0,10) : new Date(o.date).toISOString().slice(0,10)) : '' }))
+                    if (mounted) setOrders(normalized as Order[])
+                } else {
+                    // leave orders empty or load from localStorage as fallback
+                    try {
+                        const local = JSON.parse(localStorage.getItem('orders') || '[]')
+                        if (mounted) setOrders(local)
+                    } catch {
+                        // ignore
+                    }
+                }
+            } catch (e) {
+                try {
+                    const local = JSON.parse(localStorage.getItem('orders') || '[]')
+                    if (mounted) setOrders(local)
+                } catch {
+                    // ignore
+                }
+            }
+        })()
+        return () => { mounted = false }
     }, [])
 
     // generate time options every stepMin minutes between startHour and endHour (inclusive)
@@ -277,7 +326,23 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
     }
     const timeOptions = useMemo(() => generateTimeOptions(17, 22, 10), [])
 
-    function addToCart(item: MenuItem, selectedIngredients: string[] = []) {
+    function showToast(message: string, type: 'info' | 'success' | 'error' = 'info', ms = 2500) {
+        setToast({ message, type, visible: true })
+        window.setTimeout(() => setToast((t) => ({ ...t, visible: false })), ms)
+    }
+
+    function restoreFocusToCustomerSearch() {
+        setTimeout(() => {
+            try {
+                const el = searchRef.current?.querySelector('input') as HTMLInputElement | null
+                el?.focus()
+            } catch (err) {
+                // no-op
+            }
+        }, 50)
+    }
+
+    function addToCart(item: MenuItem, selectedIngredients: string[] = [], note?: string) {
         // helper: compare arrays ignoring order
         const arraysEqual = (a: string[] = [], b: string[] = []) => {
             if (a.length !== b.length) return false
@@ -288,13 +353,15 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
         }
 
     const defaultIngredients = item.ingredients ?? []
-    const normalizedSelected = (selectedIngredients || []).slice()
+    // For drinks, always use defaults and disallow customizations
+    const normalizedSelected = (item.category === 'Bevande') ? (item.ingredients ?? []).slice() : (selectedIngredients || []).slice()
     const isSameAsDefault = arraysEqual(normalizedSelected, defaultIngredients)
 
     // generate a stable cart-line id: include selected ingredients when they differ from default
     // if identical to defaults, use the plain item id so lines merge; otherwise append a suffix
+    const noteSuffix = (note && note.trim()) ? `::note:${note.trim().replace(/::/g, ' ')}` : ''
     const suffix = normalizedSelected.length ? normalizedSelected.slice().sort().join('|') : '__NONE__'
-    const key = isSameAsDefault ? item.id : `${item.id}::${suffix}`
+    const key = (isSameAsDefault ? item.id : `${item.id}::${suffix}`) + noteSuffix
 
     setCart((prev) => {
             const found = prev.find((p) => p.id === key)
@@ -309,6 +376,7 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
         // when identical to default, leave undefined; when explicitly empty, store [] to mean "no ingredients";
         // otherwise store the selected ingredients array
         selectedIngredients: isSameAsDefault ? undefined : (normalizedSelected.length ? normalizedSelected.slice() : []),
+    note: (note && note.trim()) ? note.trim() : undefined,
             }
             return [cartItem, ...prev]
         })
@@ -366,32 +434,58 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
 
     const subtotal = cart.reduce((s, it) => s + it.price * it.qty, 0)
 
+    // top products for selected customer (most ordered)
+    const topProductsForCustomer = React.useMemo(() => {
+        if (!selectedCustomerId) return [] as { itemId: string; count: number }[]
+        const counts = new Map<string, { count: number; last: number }>()
+        for (const o of orders) {
+            if (o.customerId !== selectedCustomerId) continue
+            const time = o.createdAt ? Date.parse(o.createdAt) : 0
+            for (const it of o.items || []) {
+                const pid = it.productId || it.id
+                const cur = counts.get(pid) ?? { count: 0, last: 0 }
+                cur.count += it.qty || 1
+                cur.last = Math.max(cur.last, time)
+                counts.set(pid, cur)
+            }
+        }
+        const arr = Array.from(counts.entries()).map(([itemId, v]) => ({ itemId, count: v.count, last: v.last }))
+        arr.sort((a, b) => b.count - a.count || b.last - a.last)
+        return arr.slice(0, 5).map((x) => ({ itemId: x.itemId, count: x.count }))
+    }, [selectedCustomerId, orders])
+
     function submitOrder() {
         if (cart.length === 0) {
-            alert('Il carrello è vuoto')
+                showToast('Il carrello è vuoto', 'error')
+            restoreFocusToCustomerSearch()
             return
         }
         if (!customerName.trim()) {
-            alert('Inserisci il nome del cliente')
+                showToast('Inserisci il nome del cliente', 'error')
+            restoreFocusToCustomerSearch()
             return
         }
         if (!time.trim()) {
-            alert('Inserisci l\'orario di ritiro/consegna')
+                showToast('Inserisci l\'orario di ritiro/consegna', 'error')
+            setTimeout(() => { (document.querySelector('select.category-search') as HTMLSelectElement | null)?.focus() }, 50)
             return
         }
         if (isDelivery) {
             if (!phone.trim()) {
-                alert('Inserisci il numero di cellulare per la consegna')
+                    showToast('Inserisci il numero di cellulare per la consegna', 'error')
+                setTimeout(() => { (document.querySelector('input[placeholder="Numero di cellulare"]') as HTMLInputElement | null)?.focus() }, 50)
                 return
             }
             if (!address.trim()) {
-                alert('Inserisci l\'indirizzo di consegna')
+                    showToast('Inserisci l\'indirizzo di consegna', 'error')
+                setTimeout(() => { (document.querySelector('input[placeholder="Indirizzo di consegna"]') as HTMLInputElement | null)?.focus() }, 50)
                 return
             }
         }
         const order = {
             id: `ORD-${Date.now()}`,
             createdAt: new Date().toISOString(),
+            date,
             customerName,
             customerId: selectedCustomerId ?? undefined,
             time,
@@ -402,12 +496,34 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
             items: cart,
             subtotal,
         }
-        // For now, just log and show a confirmation. In a real app you'd save/send this.
-        console.log('New order:', order)
-        // save order in local list
-        setOrders((s) => [order, ...s])
-        alert(`Ordine inviato: ${order.id} — Totale €${subtotal.toFixed(2)}`)
-        setCart([])
+        // Persist the order using Prisma (saveOrder). Fall back to localStorage if DB save fails.
+    console.log('New order (attempt save):', order);
+
+                (async () => { try {
+                                // use the secure preload bridge
+                                const res = await window.api.saveOrder(order)
+                                if (res && res.success) {
+                                    setOrders((s) => [order, ...s])
+                                    showToast(`Ordine inviato: ${order.id} — Totale €${subtotal.toFixed(2)}`, 'success')
+                                } else {
+                                    console.error('DB save failed via IPC', res?.error)
+                                    setOrders((s) => {
+                                            const next = [order, ...s]
+                                            try { localStorage.setItem('orders', JSON.stringify(next)) } catch (ex) { /* ignore storage errors */ }
+                                            return next
+                                    })
+                                    showToast(`Ordine salvato offline: ${order.id} (DB non raggiungibile)`, 'info')
+                                }
+                        } catch (e) {
+                                console.error('Unexpected error saving order', e)
+                                const next = [order, ...orders]
+                                try { localStorage.setItem('orders', JSON.stringify(next)) } catch (ex) { /* ignore */ }
+                                setOrders(next)
+                                showToast(`Ordine salvato offline: ${order.id} (errore imprevisto)`, 'info')
+                        } finally {
+                                setCart([])
+                                restoreFocusToCustomerSearch()
+                        } })()
     }
 
     // Ingredient management helpers inside modal
@@ -442,7 +558,7 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
                         </div>
                         {/* suggestions */}
                         {showSuggestions && customerQuery.trim().length > 0 && (
-                            <div className="list-group position-absolute w-100 mt-1" style={{ zIndex: 1050 }}>
+                            <div className="list-group position-absolute w-100 mt-1 customer-suggestions" style={{ zIndex: 1050 }}>
                                 {customers
                                     .filter((c) => c.name.toLowerCase().includes(customerQuery.toLowerCase()))
                                     .slice(0, 6)
@@ -470,7 +586,7 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
                             </div>
                         )}
                     </div>
-                    <div className="col-12 col-md-3">
+                    <div className="col-12 col-md-2">
                         {/* <label className="form-label text-white small category-label">Orario</label> */}
                         <select className="form-select category-search" value={time} onChange={(e) => setTime(e.target.value)}>
                             <option value="">Orario</option>
@@ -478,6 +594,9 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
                                 <option key={t} value={t}>{t}</option>
                             ))}
                         </select>
+                    </div>
+                    <div className="col-12 col-md-2">
+                        <input type="date" className="form-control category-search" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Data ordine" />
                     </div>
                     <div className="col-12 col-md-5 d-flex align-items-center">
                         <div className="btn-group btn-group-lg" role="group" aria-label="Modalità ordine">
@@ -588,7 +707,7 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
                                 <div className="modal-body">
                                     <div className="text-center">
                                         {/* placeholder image if none */}
-                                        <img className="product-modal-image" src={selectedProduct.image || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%230f172a" font-size="20">Img</text></svg>'} alt={selectedProduct.name} />
+                                        <img className="product-modal-image" src={selectedProduct.image || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%230f172a" font-size="24">Img</text></svg>'} alt={selectedProduct.name} />
                                         <div className="mb-2 fw-bold">€{selectedProduct.price.toFixed(2)}</div>
                                         <div className="text-muted mb-2">{selectedProduct.description}</div>
                                         <div className="allergens-badges mb-2">
@@ -601,58 +720,75 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
 
                                     <div>
                                         <h6>Ingredienti</h6>
-                                        <div className="ingredients-list">
-                                            {(() => {
-                                                const defaults = selectedProduct?.ingredients ?? []
-                                                // defaults shown as checklist
-                                                if (defaults.length === 0) return <div className="text-muted">Nessun ingrediente di default</div>
-                                                return defaults.map((d) => {
-                                                    const checked = productIngredients.includes(d)
-                                                    return (
-                                                        <label key={d} className="ingredient-item" style={{ cursor: 'pointer' }}>
-                                                            <input type="checkbox" checked={checked} onChange={(e) => {
-                                                                if (e.target.checked) {
-                                                                    setProductIngredients((s) => Array.from(new Set([...s, d])))
-                                                                } else {
-                                                                    setProductIngredients((s) => s.filter((x) => x !== d))
-                                                                }
-                                                            }} />
-                                                            <span style={{ marginLeft: 8 }}>{d}</span>
-                                                        </label>
-                                                    )
-                                                })
-                                            })()}
+                                        {(() => {
+                                            const isDrink = selectedProduct.category === 'Bevande'
+                                            const defaults = selectedProduct?.ingredients ?? []
+                                            if (isDrink) {
+                                                return <div className="text-muted small">Ingredienti non modificabili per le bevande</div>
+                                            }
+                                            // defaults shown as checklist
+                                            if (defaults.length === 0) return <div className="text-muted">Nessun ingrediente di default</div>
+                                            return (
+                                                <>
+                                                    <div className="ingredients-list">
+                                                                {defaults.map((d) => {
+                                                                    const checked = productIngredients.includes(d)
+                                                                    const removable = selectedProduct.category === 'Extra' || selectedProduct.id === 'd2'
+                                                                    return (
+                                                                        <div key={d} className="ingredient-item" style={{ alignItems: 'center' }}>
+                                                                            <label style={{ display: 'flex', alignItems: 'center', flex: 1, cursor: removable ? 'default' : 'pointer' }}>
+                                                                                <input type="checkbox" checked={checked} onChange={(e) => {
+                                                                                    if (e.target.checked) {
+                                                                                        setProductIngredients((s) => Array.from(new Set([...s, d])))
+                                                                                    } else {
+                                                                                        setProductIngredients((s) => s.filter((x) => x !== d))
+                                                                                    }
+                                                                                }} />
+                                                                                <span style={{ marginLeft: 8 }}>{d}</span>
+                                                                            </label>
+                                                                            {removable && (
+                                                                                <button className="btn btn-sm btn-outline-danger ms-2" onClick={() => setProductIngredients((s) => s.filter((x) => x !== d))}>Rimuovi</button>
+                                                                            )}
+                                                                        </div>
+                                                                    )
+                                                                })}
 
-                                            {/* extras: those in productIngredients not in defaults */}
-                                            {(() => {
-                                                const defaults = selectedProduct?.ingredients ?? []
-                                                const extras = productIngredients.filter((p) => !defaults.includes(p))
-                                                if (extras.length === 0) return null
-                                                return extras.map((ex, idx) => (
-                                                    <div key={`extra-${idx}`} className="ingredient-item">
-                                                        <div style={{ flex: 1 }}>{ex}</div>
-                                                        <div className="ingredient-actions">
-                                                            <button className="btn btn-sm btn-outline-danger" onClick={() => removeIngredient(productIngredients.indexOf(ex))}>Rimuovi</button>
-                                                        </div>
+                                                        {/* extras: those in productIngredients not in defaults */}
+                                                        {(() => {
+                                                            const extras = productIngredients.filter((p) => !defaults.includes(p))
+                                                            if (extras.length === 0) return null
+                                                            return extras.map((ex, idx) => (
+                                                                <div key={`extra-${idx}`} className="ingredient-item">
+                                                                    <div style={{ flex: 1 }}>{ex}</div>
+                                                                    <div className="ingredient-actions">
+                                                                        <button className="btn btn-sm btn-outline-danger" onClick={() => removeIngredient(productIngredients.indexOf(ex))}>Rimuovi</button>
+                                                                    </div>
+                                                                </div>
+                                                            ))
+                                                        })()}
                                                     </div>
-                                                ))
-                                            })()}
 
-                                        </div>
+                                                    <div className="ingredient-add-row">
+                                                        <input className="form-control form-control-sm" placeholder="Aggiungi ingrediente extra" value={newIngredientText} onChange={(e) => setNewIngredientText(e.target.value)} />
+                                                        <button className="btn btn-sm btn-primary" onClick={() => { if (newIngredientText.trim()) { setProductIngredients((s) => [...s, newIngredientText.trim()]); setNewIngredientText('') }}}>Aggiungi</button>
+                                                    </div>
+                                                </>
+                                            )
+                                        })()}
+                                    </div>
 
-                                        <div className="ingredient-add-row">
-                                            <input className="form-control form-control-sm" placeholder="Aggiungi ingrediente extra" value={newIngredientText} onChange={(e) => setNewIngredientText(e.target.value)} />
-                                            <button className="btn btn-sm btn-primary" onClick={() => { if (newIngredientText.trim()) { setProductIngredients((s) => [...s, newIngredientText.trim()]); setNewIngredientText('') }}}>Aggiungi</button>
-                                        </div>
+                                    <div className="mt-3">
+                                        <label className="form-label">Nota per l'articolo</label>
+                                        <textarea className="form-control" rows={2} placeholder="Es. ben cotta, poca mozzarella" value={productNote} onChange={(e) => setProductNote(e.target.value)} />
                                     </div>
 
                                 </div>
                                 <div className="modal-footer">
-                                    <button className="btn btn-secondary" onClick={() => { setSelectedProduct(null); setEditingCartKey(null) }}>Chiudi</button>
+                                        <button className="btn btn-secondary" onClick={() => { setSelectedProduct(null); setEditingCartKey(null); setProductNote('') }}>Chiudi</button>
                                     {editingCartKey ? (
-                                        <button className="btn btn-primary" onClick={() => { saveEditedCartItem(selectedProduct, productIngredients); setSelectedProduct(null) }}>Salva modifiche</button>
+                                        <button className="btn btn-primary" onClick={() => { saveEditedCartItem(selectedProduct, productIngredients); setSelectedProduct(null); setProductNote('') }}>Salva modifiche</button>
                                     ) : (
-                                        <button className="btn btn-success" onClick={() => { if (selectedProduct) addToCart(selectedProduct, productIngredients); setSelectedProduct(null) }}>Aggiungi al carrello</button>
+                                        <button className="btn btn-success" onClick={() => { if (selectedProduct) { addToCart(selectedProduct, productIngredients, productNote); setProductNote('') } setSelectedProduct(null) }}>Aggiungi al carrello</button>
                                     )}
                                 </div>
                             </div>
@@ -676,6 +812,27 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
                                     <input className="form-control form-control-sm category-search" placeholder="Cerca articolo..." value={itemQuery} onChange={(e) => setItemQuery(e.target.value)} />
                                 </div>
                             </div>
+                            {/* suggestion bar (moved below filters) */}
+                            {selectedCustomerId && topProductsForCustomer.length > 0 && (
+                                <div className="mb-3">
+                                    <div className="small text-muted mb-1">Suggeriti per {customers.find(c => c.id === selectedCustomerId)?.name}</div>
+                                    <div className="d-flex" style={{ gap: 8, overflowX: 'auto', paddingBottom: 6 }}>
+                                        {topProductsForCustomer.map((t) => {
+                                            const item = MENU.find(m => m.id === t.itemId)
+                                            if (!item) return null
+                                            return (
+                                                <button key={t.itemId} className="btn btn-light btn-sm d-flex align-items-center" onClick={() => addToCart(item, item.ingredients ?? [])}>
+                                                    <img src={item.image || ''} alt={item.name} style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 8 }} />
+                                                    <div style={{ marginLeft: 8, textAlign: 'left' }}>
+                                                        <div style={{ fontSize: 12, fontWeight: 700 }}>{item.name}</div>
+                                                        <div style={{ fontSize: 11 }} className="text-muted">{t.count}x</div>
+                                                    </div>
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
                             <div className="row g-3">
                                 {filtered.map((m) => (
                                     <div key={m.id} className="col-6 col-md-4 col-lg-3">
@@ -758,10 +915,12 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
                                                                 {items.map((c) => (
                                                                     <li key={c.id} className={`list-group-item d-flex align-items-center justify-content-between ${lastEditedId === c.id ? 'edited' : ''}`}>
                                                                         <div>
-                                                                            <div className="fw-bold">{c.name}</div>
-                                                                            {renderIngredientDiff(c)}
-                                                                            <div className="text-muted">€{(c.price * c.qty).toFixed(2)}</div>
-                                                                        </div>
+                                                                                <div className="fw-bold">{c.name}</div>
+                                                                            
+                                                                                {renderIngredientDiff(c)}
+                                                                                {c.note && <div className="small text-muted">Nota: {c.note}</div>}
+                                                                                <div className="text-muted">€{(c.price * c.qty).toFixed(2)}</div>
+                                                                            </div>
                                                                         <div className="d-flex align-items-center" style={{ gap: 6 }}>
                                                                             <div className="btn-group" role="group" aria-label="Quantità">
                                                                                 <button className="btn btn-outline-secondary btn-sm btn-animated" onClick={() => changeQty(c.id, -1)} aria-label="Riduci"><i className="bi bi-dash" aria-hidden></i></button>
@@ -820,6 +979,18 @@ export default function OrderPage({ viewMode }: { viewMode: 'banco' | 'lista' })
                     </main>
                 )}
             </div>
+
+            {/* in-page toast */}
+            {toast.visible && (
+                <div style={{ position: 'fixed', right: 18, bottom: 18, zIndex: 2000 }}>
+                    <div className={`toast show align-items-center text-white bg-${toast.type === 'success' ? 'success' : toast.type === 'error' ? 'danger' : 'info'}`} role="alert" aria-live="assertive" aria-atomic="true">
+                        <div className="d-flex">
+                            <div className="toast-body">{toast.message}</div>
+                            <button type="button" className="btn-close btn-close-white me-2 m-auto" onClick={() => setToast((t) => ({ ...t, visible: false }))}></button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

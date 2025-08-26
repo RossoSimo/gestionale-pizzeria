@@ -38,11 +38,11 @@ body{ font-family: 'PoppinsLocal', Poppins, system-ui, -apple-system, "Segoe UI"
 .app-topbar .navbar-brand{ font-weight:600; font-size:1rem; color:#0f172a; }
 
 /* Sidebar */
-.app-sidebar{ background: rgba(15,23,42,0.02) !important; border-right: 1px solid rgba(15,23,42,0.04); display:flex; align-items:flex-start; padding-top:12px; width:50px; flex: 0 0 50px; transition: background .18s ease, border-color .18s ease }
+.app-sidebar{ background: rgba(15,23,42,0.02) !important; box-shadow: 2px 0 12px rgba(15,23,42,0.04); display:flex; align-items:flex-start; padding-top:12px; width:50px; flex: 0 0 50px; transition: background .18s ease, box-shadow .18s ease }
 .app-sidebar .d-flex{ gap:8px; flex-direction:column; align-items:center; width:100% }
 .app-sidebar .btn{ width:40px; height:40px; border-radius:10px; display:inline-flex; align-items:center; justify-content:center; background:transparent; border:1px solid transparent; color:var(--muted); padding:0; margin-left:auto; margin-right:auto }
 .app-sidebar .btn:hover{ background:rgba(15,23,42,0.03); color:var(--accent-strong); }
-.app-sidebar:hover{ background: rgba(15,23,42,0.035) !important; border-right-color: rgba(15,23,42,0.06) }
+.app-sidebar:hover{ background: rgba(15,23,42,0.035) !important; box-shadow: 4px 0 18px rgba(15,23,42,0.06) }
 .app-sidebar .btn.btn-primary{ background:linear-gradient(180deg,var(--accent),var(--accent-strong)); border:none; color:white; box-shadow:0 6px 18px rgba(15,23,42,0.08); }
 
 /* Cards and panels */
@@ -112,7 +112,11 @@ body{ font-family: 'PoppinsLocal', Poppins, system-ui, -apple-system, "Segoe UI"
 }
 
 /* Product modal styles */
-.product-modal-image{ width:120px; height:120px; border-radius:12px; object-fit:cover; display:block; margin:0 auto 12px auto; box-shadow:0 8px 20px rgba(15,23,42,0.08); }
+.product-modal-image{ width:200px; height:200px; border-radius:14px; object-fit:cover; display:block; margin:0 auto 16px auto; box-shadow:0 12px 28px rgba(15,23,42,0.10); }
+
+@media (max-width: 576px){
+  .product-modal-image{ width:140px; height:140px }
+}
 .product-modal .modal-body{ display:flex; gap:16px; flex-direction:column; }
 .ingredients-list{ display:flex; flex-direction:column; gap:8px; max-height:240px; overflow:auto; padding-right:6px }
 .ingredient-item{ display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; background:linear-gradient(180deg,#ffffff,#fbfbfd); border:1px solid rgba(15,23,42,0.04); }
@@ -145,6 +149,11 @@ body{ font-family: 'PoppinsLocal', Poppins, system-ui, -apple-system, "Segoe UI"
 }
 .category-toolbar .btn-group::-webkit-scrollbar{ display:none }
 .category-filter-btn{ flex: 0 0 auto; white-space: nowrap; }
+
+/* customer suggestion list: always visible white background for readability */
+.customer-suggestions{ background: transparent }
+.customer-suggestions .list-group-item{ background: #ffffff; border-radius:8px; box-shadow:0 6px 18px rgba(15,23,42,0.06); margin-bottom:6px }
+.customer-suggestions .list-group-item .fw-semibold{ font-weight:700 }
 
 /* Ensure main content and aside don't shrink unexpectedly */
 main.flex-fill{ min-width: 0 }

@@ -28,7 +28,7 @@
 
 import '../src/index.css';
 
-console.log('👋 This message is being logged by "renderer.ts", included via Vite');
+console.log('rendere.ts caricato');
 
 // Add this to the end of the existing file
 import '../src/main';

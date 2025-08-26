@@ -1,5 +1,6 @@
-import { app, BrowserWindow, Menu } from 'electron';
+import { app, BrowserWindow, Menu, ipcMain } from 'electron';
 import path from 'node:path';
+import { PrismaClient } from '@prisma/client'
 import started from 'electron-squirrel-startup';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -34,7 +35,54 @@ const createWindow = () => {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
+const prisma = new PrismaClient()
+
 app.on('ready', createWindow);
+
+// IPC handlers: expose minimal DB operations to renderer via preload bridge
+ipcMain.handle('db:saveOrder', async (_, order) => {
+  try {
+    const created = await prisma.order.create({ data: {
+      id: order.id,
+      createdAt: new Date(order.createdAt),
+  date: order.date ? new Date(order.date) : new Date(),
+      customerName: order.customerName,
+      customerId: order.customerId ?? null,
+      time: order.time,
+      isDelivery: !!order.isDelivery,
+      phone: order.phone ?? null,
+      address: order.address ?? null,
+      notes: order.notes ?? null,
+      items: JSON.stringify(order.items || []),
+      subtotal: order.subtotal || 0,
+    } })
+    return { success: true, result: created }
+  } catch (e) {
+    console.error('ipc db:saveOrder error', e)
+    return { success: false, error: String(e) }
+  }
+})
+
+ipcMain.handle('db:getOrders', async () => {
+  try {
+    const rows = await prisma.order.findMany({ orderBy: { createdAt: 'desc' } })
+  const normalized = rows.map(r => ({ ...r, items: JSON.parse(String(r.items)), date: r.date }))
+    return { success: true, result: normalized }
+  } catch (e) {
+    console.error('ipc db:getOrders error', e)
+    return { success: false, error: String(e), result: [] }
+  }
+})
+
+ipcMain.handle('db:clearOrders', async () => {
+  try {
+    await prisma.order.deleteMany()
+    return { success: true }
+  } catch (e) {
+    console.error('ipc db:clearOrders error', e)
+    return { success: false, error: String(e) }
+  }
+})
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits

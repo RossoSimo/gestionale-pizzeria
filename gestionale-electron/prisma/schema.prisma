@@ -1,0 +1,200 @@
+// schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Ora usiamo sqlite per il gestionale locale in pizzeria
+  provider = "sqlite"
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+  CONFLICT
+}
+
+enum ProductCategory {
+  PIZZA
+  BEVANDA
+  FRITTO
+  DOLCE
+  ALTRO
+}
+
+enum OrderStatus {
+  IN_ATTESA
+  IN_PREPARAZIONE
+  PRONTO
+  CONSEGNATO
+  CONFERMATO
+  ANNULLATO
+}
+
+enum OrderType {
+  ASPORTO
+  DOMICILIO
+}
+
+enum ModifierAction {
+  AGGIUNGI
+  RIMUOVI
+}
+
+// ------------------------------------------------------------------
+// 1. ANAGRAFICA E PRODOTTI
+// ------------------------------------------------------------------
+
+model Customer {
+  id        String    @id @default(uuid())
+  name      String
+  //surname   String
+  phone     String?
+  address   String?
+  notes     String?   // Es: "Citofono rotto", "Cane cattivo"
+  
+  orders    Order[]
+
+  // Metadati per sincronizzazione offline-first
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  version   Int       @default(1)
+  syncStatus SyncStatus @default(PENDING)
+  lastSyncedAt DateTime?
+
+  @@index([updatedAt])
+  @@index([deletedAt])
+  @@index([syncStatus])
+}
+
+model Product {
+  id          String          @id @default(uuid())
+  name        String          // Es: "Margherita", "Coca Cola 33cl"
+  description String?
+  priceCents  Int
+  category    ProductCategory
+  
+  orderItems  OrderItem[]
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  deletedAt   DateTime?
+  version     Int             @default(1)
+  syncStatus  SyncStatus      @default(PENDING)
+  lastSyncedAt DateTime?
+
+  @@index([updatedAt])
+  @@index([deletedAt])
+  @@index([syncStatus])
+}
+
+model Ingredient {
+  id                  String    @id @default(uuid())
+  name                String    // Es: "Salame Piccante", "Mozzarella"
+  extraPriceCents     Int       @default(0)
+  removeDiscountCents Int       @default(0)
+  
+  modifiers OrderItemModifier[]
+
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+  version     Int         @default(1)
+  syncStatus  SyncStatus  @default(PENDING)
+  lastSyncedAt DateTime?
+
+  @@index([updatedAt])
+  @@index([deletedAt])
+  @@index([syncStatus])
+}
+
+// ------------------------------------------------------------------
+// 2. ORDINI E DETTAGLI (IL CUORE DEL GESTIONALE)
+// ------------------------------------------------------------------
+
+model Order {
+  id               String      @id @default(uuid())
+  businessDate     DateTime
+  dailyNumber      Int         // Numero leggibile per il pizzaiolo (es. Ordine #42)
+  status           OrderStatus
+  type             OrderType
+  totalAmountCents Int
+  
+  expectedAt       DateTime? // Orario di ritiro o consegna richiesto
+  
+  customerId       String?
+  customer         Customer? @relation(fields: [customerId], references: [id])
+  
+  items            OrderItem[]
+
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  deletedAt        DateTime?
+  version          Int         @default(1)
+  syncStatus       SyncStatus  @default(PENDING)
+  lastSyncedAt     DateTime?
+
+  @@unique([businessDate, dailyNumber])
+  @@index([status])
+  @@index([expectedAt])
+  @@index([updatedAt])
+  @@index([deletedAt])
+  @@index([syncStatus])
+}
+
+model OrderItem {
+  id             String    @id @default(uuid())
+  quantity       Int       @default(1)
+  unitPriceCents Int       // Prezzo bloccato al momento dell'ordine
+  notes          String?   // Note libere: es. "Ben cotta"
+  
+  orderId        String
+  order          Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  productId      String
+  product        Product   @relation(fields: [productId], references: [id])
+
+  modifiers      OrderItemModifier[]
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+  version        Int         @default(1)
+  syncStatus     SyncStatus  @default(PENDING)
+  lastSyncedAt   DateTime?
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([updatedAt])
+  @@index([deletedAt])
+  @@index([syncStatus])
+}
+
+// Questa tabella gestisce le variazioni: "CON", "SENZA", "DOPPIO"
+model OrderItemModifier {
+  id               String         @id @default(uuid())
+  action           ModifierAction
+  priceAppliedCents Int           // Costo della variazione bloccato al momento dell'ordine
+  
+  orderItemId      String
+  orderItem        OrderItem      @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  
+  ingredientId     String
+  ingredient       Ingredient     @relation(fields: [ingredientId], references: [id])
+
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  deletedAt        DateTime?
+  version          Int            @default(1)
+  syncStatus       SyncStatus     @default(PENDING)
+  lastSyncedAt     DateTime?
+
+  @@index([orderItemId])
+  @@index([ingredientId])
+  @@index([updatedAt])
+  @@index([deletedAt])
+  @@index([syncStatus])
+}

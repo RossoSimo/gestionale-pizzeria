@@ -34,15 +34,59 @@ function normalizeIpcError(error) {
   return fallback;
 }
 
+function createBridgeUnavailableError(methodName) {
+  const message =
+    "Bridge IPC non disponibile. Avvia l'app con 'npm run dev' o 'npm start' per usare Electron.";
+  const error = new Error(`${message} (metodo: ${methodName})`);
+  error.code = "IPC_BRIDGE_UNAVAILABLE";
+  error.details = {
+    methodName,
+    help: "Esegui il renderer dentro Electron: npm run dev",
+  };
+  return error;
+}
+
+function createBrowserFallbackBridge() {
+  return {
+    // Read-only views can still render in pure browser mode using empty datasets.
+    listOrders: async () => ({ data: [], meta: { source: "browser-fallback" } }),
+    listProducts: async () => ({ data: [], meta: { source: "browser-fallback" } }),
+    // Mutations require main-process handlers and local DB access.
+    createOrder: async () => {
+      throw createBridgeUnavailableError("createOrder");
+    },
+    updateOrderStatus: async () => {
+      throw createBridgeUnavailableError("updateOrderStatus");
+    },
+    createProduct: async () => {
+      throw createBridgeUnavailableError("createProduct");
+    },
+    updateProduct: async () => {
+      throw createBridgeUnavailableError("updateProduct");
+    },
+    deleteProduct: async () => {
+      throw createBridgeUnavailableError("deleteProduct");
+    },
+    getAppVersion: async () => "browser-preview",
+    ping: async () => ({ ok: true, mode: "browser-fallback" }),
+  };
+}
+
+const browserFallbackBridge = createBrowserFallbackBridge();
+
 /**
  * Resolves a typed method exposed by preload bridge and fails fast if missing.
  */
 function getBridgeMethod(methodName) {
-  if (!window.electronAPI || typeof window.electronAPI[methodName] !== "function") {
-    throw new Error(`Bridge IPC non disponibile: ${methodName}`);
+  if (window.electronAPI && typeof window.electronAPI[methodName] === "function") {
+    return window.electronAPI[methodName];
   }
 
-  return window.electronAPI[methodName];
+  if (typeof browserFallbackBridge[methodName] === "function") {
+    return browserFallbackBridge[methodName];
+  }
+
+  throw createBridgeUnavailableError(methodName);
 }
 
 /**

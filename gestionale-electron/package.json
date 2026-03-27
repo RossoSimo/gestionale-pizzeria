@@ -7,6 +7,7 @@
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
     "dev:electron": "wait-on tcp:5173 && electron .",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "build": "vite build",
     "start": "electron ."
   },
@@ -15,6 +16,7 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
     "@tailwindcss/vite": "^4.2.2",
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
@@ -24,7 +26,9 @@
     "wait-on": "^9.0.4"
   },
   "dependencies": {
+    "@prisma/adapter-better-sqlite3": "^7.6.0",
     "@prisma/client": "^7.5.0",
+    "better-sqlite3": "^12.8.0",
     "electron": "^41.1.0",
     "lucide-react": "^1.7.0",
     "react": "^19.2.4",

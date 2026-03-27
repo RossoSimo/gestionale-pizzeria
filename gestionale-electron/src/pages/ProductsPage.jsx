@@ -16,11 +16,13 @@ export default function ProductsPage() {
   const { products, loading, error, reload } = useProducts();
   const [formData, setFormData] = useState(buildDefaultFormState());
   const [submitting, setSubmitting] = useState(false);
+  const [actionError, setActionError] = useState(null);
 
   async function handleCreateProduct(event) {
     // Creates a product through IPC and refreshes local list from SQLite source of truth.
     event.preventDefault();
     setSubmitting(true);
+    setActionError(null);
 
     try {
       // Form values are normalized here before crossing IPC boundary.
@@ -34,6 +36,8 @@ export default function ProductsPage() {
 
       setFormData(buildDefaultFormState());
       await reload();
+    } catch (err) {
+      setActionError(err);
     } finally {
       setSubmitting(false);
     }
@@ -41,8 +45,14 @@ export default function ProductsPage() {
 
   async function handleDeleteProduct(productId) {
     // Deletes are soft deletes at repository level to preserve sync history.
-    await deleteProduct({ id: productId });
-    await reload();
+    setActionError(null);
+
+    try {
+      await deleteProduct({ id: productId });
+      await reload();
+    } catch (err) {
+      setActionError(err);
+    }
   }
 
   return (
@@ -107,6 +117,7 @@ export default function ProductsPage() {
       </form>
 
       {error && <p className="text-sm text-red-600">{error.message}</p>}
+      {actionError && <p className="text-sm text-red-600">{actionError.message}</p>}
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">

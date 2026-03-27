@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useOrders } from "../features/orders/hooks/useOrders";
+import { useProducts } from "../features/products/hooks/useProducts";
+import { centsToEuro } from "../lib/money";
 import { createOrder, updateOrderStatus } from "../services/ipc/orders.ipc";
 
 const NEXT_STATUS_OPTIONS = {
@@ -16,6 +18,7 @@ function buildDefaultFormState() {
   return {
     type: "ASPORTO",
     productId: "",
+    productName: "",
     quantity: 1,
     unitPriceCents: 0,
   };
@@ -23,13 +26,18 @@ function buildDefaultFormState() {
 
 export default function OrdersPage() {
   const { orders, loading, error, reload } = useOrders();
+  const { products, loading: productsLoading } = useProducts();
   const [formData, setFormData] = useState(buildDefaultFormState());
   const [submitting, setSubmitting] = useState(false);
+  const [actionError, setActionError] = useState(null);
+
+  const selectedProduct = products.find((product) => product.id === formData.productId) ?? null;
 
   async function handleCreateOrder(event) {
     // Creates a minimal single-item order payload for the current MVP flow.
     event.preventDefault();
     setSubmitting(true);
+    setActionError(null);
 
     try {
       // Minimal UI payload for now: one line item, no modifiers.
@@ -51,6 +59,8 @@ export default function OrdersPage() {
 
       setFormData(buildDefaultFormState());
       await reload();
+    } catch (err) {
+      setActionError(err);
     } finally {
       setSubmitting(false);
     }
@@ -58,8 +68,14 @@ export default function OrdersPage() {
 
   async function handleStatusChange(orderId, nextStatus) {
     // Persist status transition first, then refresh list from local DB source of truth.
-    await updateOrderStatus({ orderId, nextStatus });
-    await reload();
+    setActionError(null);
+
+    try {
+      await updateOrderStatus({ orderId, nextStatus });
+      await reload();
+    } catch (err) {
+      setActionError(err);
+    }
   }
 
   return (
@@ -80,16 +96,30 @@ export default function OrdersPage() {
         </label>
 
         <label className="grid gap-1 text-sm text-slate-600">
-          Product ID
-          <input
+          Prodotto
+          <select
             value={formData.productId}
-            onChange={(event) =>
-              setFormData((prev) => ({ ...prev, productId: event.target.value.trim() }))
-            }
+            onChange={(event) => {
+              const product = products.find((candidate) => candidate.id === event.target.value) ?? null;
+
+              setFormData((prev) => ({
+                ...prev,
+                productId: product?.id ?? "",
+                productName: product?.name ?? "",
+                unitPriceCents: product?.priceCents ?? 0,
+              }));
+            }}
             required
-            className="bg-slate-50 px-2 py-2 text-sm"
-            placeholder="UUID prodotto"
-          />
+            disabled={productsLoading || products.length === 0}
+            className="bg-slate-50 px-2 py-2 text-sm disabled:opacity-60"
+          >
+            <option value="">Seleziona prodotto</option>
+            {products.map((product) => (
+              <option key={product.id} value={product.id}>
+                {product.name} - {centsToEuro(product.priceCents)} EUR
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="grid gap-1 text-sm text-slate-600">
@@ -116,9 +146,14 @@ export default function OrdersPage() {
           />
         </label>
 
+        <p className="text-sm text-slate-600 md:col-span-2">
+          Totale riga: <strong>{centsToEuro(formData.quantity * formData.unitPriceCents)} EUR</strong>
+          {selectedProduct ? ` (${selectedProduct.name})` : ""}
+        </p>
+
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || !formData.productId}
           className="bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60 md:col-span-4"
         >
           {submitting ? "Salvataggio..." : "Crea ordine"}
@@ -126,6 +161,7 @@ export default function OrdersPage() {
       </form>
 
       {error && <p className="text-sm text-red-600">{error.message}</p>}
+      {actionError && <p className="text-sm text-red-600">{actionError.message}</p>}
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">

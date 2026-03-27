@@ -22,7 +22,8 @@ function createMainWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      // Keep preload capable of requiring local CommonJS modules (IPC channels/contracts).
+      sandbox: false,
     },
   });
 
@@ -53,6 +54,10 @@ app.whenReady().then(() => {
       createMainWindow();
     }
   });
+}).catch((error) => {
+  // Avoid unhandled rejections during startup (DB/init errors, IPC wiring, etc.).
+  console.error("Electron startup failed:", error);
+  app.quit();
 });
 
 app.on("window-all-closed", () => {

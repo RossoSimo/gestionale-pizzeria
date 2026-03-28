@@ -78,6 +78,7 @@ model Product {
   category    ProductCategory
   
   orderItems  OrderItem[]
+  productIngredients ProductIngredient[]
 
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
@@ -97,6 +98,7 @@ model Ingredient {
   extraPriceCents     Int       @default(0)
   removeDiscountCents Int       @default(0)
   
+  productIngredients ProductIngredient[]
   modifiers OrderItemModifier[]
 
   createdAt   DateTime    @default(now())
@@ -106,6 +108,30 @@ model Ingredient {
   syncStatus  SyncStatus  @default(PENDING)
   lastSyncedAt DateTime?
 
+  @@index([updatedAt])
+  @@index([deletedAt])
+  @@index([syncStatus])
+}
+
+model ProductIngredient {
+  id            String      @id @default(uuid())
+
+  productId      String
+  product        Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  ingredientId   String
+  ingredient     Ingredient  @relation(fields: [ingredientId], references: [id])
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+  version        Int         @default(1)
+  syncStatus     SyncStatus  @default(PENDING)
+  lastSyncedAt   DateTime?
+
+  @@unique([productId, ingredientId])
+  @@index([productId])
+  @@index([ingredientId])
   @@index([updatedAt])
   @@index([deletedAt])
   @@index([syncStatus])

@@ -7,5 +7,9 @@
   "PRODUCTS_LIST": "products:list",
   "PRODUCTS_CREATE": "products:create",
   "PRODUCTS_UPDATE": "products:update",
-  "PRODUCTS_DELETE": "products:delete"
+  "PRODUCTS_DELETE": "products:delete",
+  "INGREDIENTS_LIST": "ingredients:list",
+  "INGREDIENTS_CREATE": "ingredients:create",
+  "INGREDIENTS_UPDATE": "ingredients:update",
+  "INGREDIENTS_DELETE": "ingredients:delete"
 }

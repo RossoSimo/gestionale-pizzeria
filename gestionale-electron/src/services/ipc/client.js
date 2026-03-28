@@ -51,6 +51,7 @@ function createBrowserFallbackBridge() {
     // Read-only views can still render in pure browser mode using empty datasets.
     listOrders: async () => ({ data: [], meta: { source: "browser-fallback" } }),
     listProducts: async () => ({ data: [], meta: { source: "browser-fallback" } }),
+    listIngredients: async () => ({ data: [], meta: { source: "browser-fallback" } }),
     // Mutations require main-process handlers and local DB access.
     createOrder: async () => {
       throw createBridgeUnavailableError("createOrder");
@@ -66,6 +67,15 @@ function createBrowserFallbackBridge() {
     },
     deleteProduct: async () => {
       throw createBridgeUnavailableError("deleteProduct");
+    },
+    createIngredient: async () => {
+      throw createBridgeUnavailableError("createIngredient");
+    },
+    updateIngredient: async () => {
+      throw createBridgeUnavailableError("updateIngredient");
+    },
+    deleteIngredient: async () => {
+      throw createBridgeUnavailableError("deleteIngredient");
     },
     getAppVersion: async () => "browser-preview",
     ping: async () => ({ ok: true, mode: "browser-fallback" }),

@@ -23,6 +23,16 @@ Use these rules for renderer UI changes.
 - Avoid "boxed window" outlines; use subtle borders, separators, and soft shadows.
 - Keep typography simple, crisp, and consistent.
 
+## Interaction patterns
+- Prefer modal-based create/edit flows for catalog entities (products, ingredients) instead of long inline forms.
+- Keep searchable list-first management screens: list/table visible by default, forms in modal overlays.
+- For order composition, support context actions from catalog cards (right-click customization) and reuse the same modal for cart-item edits.
+- Keep variation summaries visible in cart rows (under product name) so operators can review changes without reopening modals.
+
+## Money display
+- Persist and compute monetary values in integer cents only.
+- In renderer UI, display monetary values as euro labels with comma separator (example: `12,50 EUR`).
+
 ## Tailwind usage
 - Prefer Tailwind utility classes over custom CSS for component styling.
 - Keep utility classes readable and composable.

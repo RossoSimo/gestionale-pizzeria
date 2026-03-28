@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
-    "dev:electron": "wait-on tcp:5173 && electron .",
+    "dev:electron": "npm run prisma:generate && wait-on tcp:5173 && electron .",
+    "prisma:generate": "prisma generate",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "build": "vite build",
-    "start": "electron ."
+    "start": "npm run prisma:generate && electron ."
   },
   "keywords": [],
   "author": "",

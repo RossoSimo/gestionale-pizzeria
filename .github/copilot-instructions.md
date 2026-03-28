@@ -58,9 +58,20 @@ Use this structure as the default unless explicitly asked otherwise:
 # Data And Sync Conventions
 
 1. Monetary values: use integer cents fields (example: `priceCents`, `totalAmountCents`).
+1. UI monetary display: show amounts as EUR with comma decimal separator (example `12,50 EUR`) while keeping persistence and calculations in cents.
 2. Domain statuses/types: use enums instead of free-form strings.
 3. Sync metadata per entity: `createdAt`, `updatedAt`, `deletedAt`, `version`, `syncStatus`, `lastSyncedAt`.
 4. Deletions must be soft deletes (`deletedAt`) to support sync reconciliation.
+
+# Current UI Product/Order Workflows
+
+1. Product and ingredient create/edit flows must use modal dialogs, not inline forms.
+2. Product page layout should keep searchable list/table sections and place primary create actions (`Aggiungi prodotto`, `Aggiungi ingrediente`) in top-right header actions.
+3. Pizza product upsert must allow selecting base ingredients (`ingredientIds`) in the product modal.
+4. Orders page supports product customization via a shared modal:
+	- right-click on product card opens customization modal before adding to cart
+	- cart item `Personalizza` opens the same modal for editing existing line item customization
+5. Cart line items must show a readable variation summary under product name (adds/removals with price impact).
 
 # IPC Conventions
 

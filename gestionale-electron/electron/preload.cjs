@@ -11,4 +11,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   createProduct: (payload) => ipcRenderer.invoke(channels.PRODUCTS_CREATE, payload),
   updateProduct: (payload) => ipcRenderer.invoke(channels.PRODUCTS_UPDATE, payload),
   deleteProduct: (payload) => ipcRenderer.invoke(channels.PRODUCTS_DELETE, payload),
+  listIngredients: (filters) => ipcRenderer.invoke(channels.INGREDIENTS_LIST, filters),
+  createIngredient: (payload) => ipcRenderer.invoke(channels.INGREDIENTS_CREATE, payload),
+  updateIngredient: (payload) => ipcRenderer.invoke(channels.INGREDIENTS_UPDATE, payload),
+  deleteIngredient: (payload) => ipcRenderer.invoke(channels.INGREDIENTS_DELETE, payload),
 });

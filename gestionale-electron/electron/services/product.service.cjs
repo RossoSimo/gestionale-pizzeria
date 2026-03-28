@@ -44,6 +44,19 @@ function createProductService(productRepository) {
       throw buildValidationError("Categoria prodotto non valida", { field: "category" });
     }
 
+    if (payload.ingredientIds != null && !Array.isArray(payload.ingredientIds)) {
+      throw buildValidationError("ingredientIds deve essere un array", { field: "ingredientIds" });
+    }
+
+    const ingredientIds = Array.isArray(payload.ingredientIds)
+      ? payload.ingredientIds
+          .filter((value) => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : [];
+
+    const dedupedIngredientIds = Array.from(new Set(ingredientIds));
+
     // Normalize strings once so repository receives clean, deterministic payloads.
     return {
       name: payload.name.trim(),
@@ -53,6 +66,7 @@ function createProductService(productRepository) {
           : null,
       priceCents: payload.priceCents,
       category: payload.category,
+      ingredientIds: payload.category === "PIZZA" ? dedupedIngredientIds : [],
     };
   }
 

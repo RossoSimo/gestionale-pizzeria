@@ -1,5 +1,7 @@
 {
   "APP_GET_VERSION": "app:getVersion",
+  "APP_SETTINGS_GET": "appSettings:get",
+  "APP_SETTINGS_UPDATE": "appSettings:update",
   "HEALTH_PING": "health:ping",
   "ORDERS_LIST": "orders:list",
   "ORDERS_CREATE": "orders:create",

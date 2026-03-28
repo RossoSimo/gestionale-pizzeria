@@ -3,6 +3,8 @@ const channels = require("./ipc/channels.cjs");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   getAppVersion: () => ipcRenderer.invoke(channels.APP_GET_VERSION),
+  getAppSettings: () => ipcRenderer.invoke(channels.APP_SETTINGS_GET),
+  updateAppSettings: (payload) => ipcRenderer.invoke(channels.APP_SETTINGS_UPDATE, payload),
   ping: () => ipcRenderer.invoke(channels.HEALTH_PING),
   listOrders: (filters) => ipcRenderer.invoke(channels.ORDERS_LIST, filters),
   createOrder: (payload) => ipcRenderer.invoke(channels.ORDERS_CREATE, payload),

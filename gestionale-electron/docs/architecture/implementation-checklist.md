@@ -1,11 +1,19 @@
 # Implementation Checklist (File by File)
 
+## 0) New Operational Guidelines (Local vs Cloud)
+
+- [X] Local DB deletion/reset is documented as local-only action (no implicit cloud delete).
+- [ ] Automatic cloud-to-local bootstrap on app start implemented.
+- [X] Explicit note added: local rehydration from cloud requires dedicated pull/restore flow.
+- [X] Defensive repository sanitization added for corrupted singleton settings rows before ORM reads.
+
 ## 1) Prisma and data model
 
 - [X] `prisma/schema.prisma`
 - [X] Add missing entities (if needed): table/room/ticket settings.
 - [X] Review enum coverage for domain states.
 - [X] Ensure all entities keep sync metadata (`createdAt`, `updatedAt`, `deletedAt`, `version`, `syncStatus`, `lastSyncedAt`).
+- [X] Add dynamic category support for products/settings (`Product.category` string + settings extras storage).
 
 ## 2) Electron local DB layer
 
@@ -31,6 +39,7 @@
 
 - [X] `electron/services/sync.service.cjs`
 - [X] Implement queue enqueue/flush and retry policy.
+- [ ] Implement real cloud API processEvent integration (replace TODO stub).
 
 ## 4) IPC layer
 
@@ -73,9 +82,16 @@
 
 - [X] `src/pages/ProductsPage.jsx`
 - [X] Build products management flow.
+- [X] Bind product category options to dynamic settings categories.
 
 - [X] `src/pages/DashboardPage.jsx`
 - [X] Add KPIs from local DB.
+
+- [X] `src/pages/SettingsPage.jsx`
+- [X] Add dynamic category management (add/edit/remove custom categories).
+
+- [X] `src/pages/OrdersPage.jsx`
+- [X] Use dynamic category filters/grouping/counters and hide zero-quantity counters.
 
 ## 7) Cloud API scaffold
 
@@ -90,3 +106,9 @@
 
 - [X] `api/docs/sync-contract.md`
 - [X] Finalize payload contract and conflict strategy.
+
+## 8) Sync Recovery and Bootstrap
+
+- [ ] Add startup bootstrap task to pull data from cloud when local DB is missing/empty.
+- [ ] Define conflict-safe rehydration strategy for restored local devices.
+- [ ] Add operator-visible status for bootstrap/sync progress and failures.

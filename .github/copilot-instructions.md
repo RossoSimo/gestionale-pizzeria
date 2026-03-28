@@ -16,6 +16,9 @@ The architecture relies on an Electron desktop app with a local SQLite database 
 2. **Offline-First Approach:** The Electron app (React frontend) must ALWAYS read from and write to the local SQLite database first. Do not make the UI wait for a cloud API call to save an order. 
 3. **Synchronization Logic:** Network calls to the Express API should be treated as background sync tasks. Assume network availability is unreliable.
 4. **Electron IPC:** The React frontend (Renderer process) MUST NOT access SQLite or the file system directly. All database operations must go through Electron's `ipcRenderer` and `ipcMain` context bridge. Ensure secure IPC communication.
+5. **Local vs Cloud Data Ownership:** Deleting or resetting the local SQLite database MUST NOT be treated as a cloud delete. Cloud data remains untouched unless explicit cloud-side operations are executed.
+6. **Cloud Rehydration Is Explicit:** Do not assume automatic data restore from cloud after local DB loss. Implement an explicit bootstrap/pull flow if local rehydration is required.
+7. **Corrupted Local Data Guardrails:** Repository bootstrapping for singleton settings/config rows should be defensive (sanitize invalid persisted values before ORM reads) to prevent runtime crashes.
 
 # Coding Standards
 - Write modular, clean, and self-documenting code.
@@ -72,6 +75,9 @@ Use this structure as the default unless explicitly asked otherwise:
 	- right-click on product card opens customization modal before adding to cart
 	- cart item `Personalizza` opens the same modal for editing existing line item customization
 5. Cart line items must show a readable variation summary under product name (adds/removals with price impact).
+6. Settings page must support category administration (add/edit/remove custom categories) while preserving the base categories (`PIZZA`, `BEVANDA`, `ALTRO`).
+7. Products and Orders UIs must consume categories dynamically from settings; avoid hard-coded category option lists in renderer logic.
+8. Cart category counters should render only categories with quantity greater than zero.
 
 # IPC Conventions
 

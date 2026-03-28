@@ -1,7 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Pencil, Trash2 } from "lucide-react";
 import { useIngredients } from "../features/ingredients/hooks/useIngredients";
 import { useOrders } from "../features/orders/hooks/useOrders";
 import { useProducts } from "../features/products/hooks/useProducts";
+import { useAppSettings } from "../features/settings/hooks/useAppSettings";
+import { buildExpectedAtIso, buildTimeSlotsForDate, getTodayDateInputValue } from "../lib/order-slots";
 import { centsToEuro } from "../lib/money";
 import { createOrder, updateOrderStatus } from "../services/ipc/orders.ipc";
 
@@ -14,20 +17,27 @@ const NEXT_STATUS_OPTIONS = {
   ANNULLATO: [],
 };
 
-function buildDefaultFormState() {
+const BASE_CATEGORY_ORDER = ["PIZZA", "BEVANDA", "ALTRO"];
+
+function buildDefaultFormState(businessDate, availableTimeSlots) {
   return {
     type: "ASPORTO",
     customerId: "",
+    businessDate,
+    expectedTimeSlot: availableTimeSlots[0] ?? "",
+    notes: "",
   };
 }
 
-function getCategoryLabel(category) {
+function getCategoryLabel(category, categoryLabels) {
+  if (categoryLabels && typeof categoryLabels[category] === "string" && categoryLabels[category].trim()) {
+    return categoryLabels[category].trim();
+  }
+
   const labels = {
     ALL: "Tutti",
     PIZZA: "Pizze",
-    BEVANDA: "Bevande",
-    FRITTO: "Fritti",
-    DOLCE: "Dolci",
+    BEVANDA: "Bevanda",
     ALTRO: "Altro",
   };
 
@@ -76,6 +86,16 @@ function computeModifiersPerUnit(modifiers) {
   return (modifiers ?? []).reduce((sum, modifier) => sum + (modifier.priceAppliedCents ?? 0), 0);
 }
 
+function isUnmodifiedCartItem(item) {
+  const hasNoModifiers = !Array.isArray(item?.modifiers) || item.modifiers.length === 0;
+  const hasNoNotes = typeof item?.notes !== "string" || !item.notes.trim();
+  return hasNoModifiers && hasNoNotes;
+}
+
+function isPizzaCategory(category) {
+  return category === "PIZZA";
+}
+
 function buildRemoveModifier(ingredient) {
   return {
     ingredientId: ingredient.id,
@@ -114,6 +134,40 @@ function formatModifierPriceLabel(cents) {
   return `-${formatEuroLabel(Math.abs(cents))}`;
 }
 
+function formatDateLabel(value) {
+  if (typeof value !== "string" || !value) {
+    return "-";
+  }
+
+  const [year, month, day] = value.split("-");
+
+  if (!year || !month || !day) {
+    return value;
+  }
+
+  return `${day}/${month}/${year}`;
+}
+
+function formatDateTimeLabel(value) {
+  if (!value) {
+    return "Non specificato";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Non specificato";
+  }
+
+  return date.toLocaleString("it-IT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function buildCustomizationState() {
   return {
     isOpen: false,
@@ -121,8 +175,10 @@ function buildCustomizationState() {
     lineItemId: null,
     productId: "",
     productName: "",
+    productCategory: "",
     unitPriceCents: 0,
     quantity: 1,
+    notes: "",
     baseIngredients: [],
     modifiers: [],
   };
@@ -153,16 +209,63 @@ function Modal({ title, onClose, children }) {
 }
 
 export default function OrdersPage() {
+  const todayDate = useMemo(() => getTodayDateInputValue(), []);
   const { orders, loading, error, reload } = useOrders();
   const { products, loading: productsLoading } = useProducts();
   const { ingredients } = useIngredients();
-  const [formData, setFormData] = useState(buildDefaultFormState());
+  const { settings: appSettings } = useAppSettings();
+  const [formData, setFormData] = useState(() => buildDefaultFormState(todayDate, []));
+  const availableTimeSlots = useMemo(
+    () => buildTimeSlotsForDate(appSettings, formData.businessDate),
+    [appSettings, formData.businessDate]
+  );
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [cartItems, setCartItems] = useState([]);
   const [customization, setCustomization] = useState(buildCustomizationState());
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const categoryLabels = appSettings?.categoryLabels;
+
+  const categoryOrder = useMemo(() => {
+    const labelsKeys = Object.keys(categoryLabels ?? {});
+    const productKeys = products.map((product) => product.category).filter(Boolean);
+    const unique = new Set([...BASE_CATEGORY_ORDER, ...labelsKeys, ...productKeys]);
+    const ordered = Array.from(unique);
+
+    return ordered.sort((a, b) => {
+      const aBaseIndex = BASE_CATEGORY_ORDER.indexOf(a);
+      const bBaseIndex = BASE_CATEGORY_ORDER.indexOf(b);
+
+      if (aBaseIndex >= 0 && bBaseIndex >= 0) {
+        return aBaseIndex - bBaseIndex;
+      }
+
+      if (aBaseIndex >= 0) {
+        return -1;
+      }
+
+      if (bBaseIndex >= 0) {
+        return 1;
+      }
+
+      return getCategoryLabel(a, categoryLabels).localeCompare(getCategoryLabel(b, categoryLabels), "it-IT");
+    });
+  }, [categoryLabels, products]);
+
+  useEffect(() => {
+    setFormData((prev) => {
+      const preservedSlot = availableTimeSlots.includes(prev.expectedTimeSlot)
+        ? prev.expectedTimeSlot
+        : (availableTimeSlots[0] ?? "");
+
+      return {
+        ...prev,
+        businessDate: prev.businessDate || todayDate,
+        expectedTimeSlot: preservedSlot,
+      };
+    });
+  }, [availableTimeSlots, todayDate]);
 
   const knownCustomers = useMemo(() => buildKnownCustomers(orders), [orders]);
 
@@ -182,6 +285,17 @@ export default function OrdersPage() {
     });
   }, [products, searchQuery, selectedCategory]);
 
+  const groupedVisibleProducts = useMemo(() => {
+    if (selectedCategory !== "ALL") {
+      return [];
+    }
+
+    return categoryOrder.map((category) => ({
+      category,
+      items: visibleProducts.filter((product) => product.category === category),
+    })).filter((group) => group.items.length > 0);
+  }, [categoryOrder, selectedCategory, visibleProducts]);
+
   const totalAmountCents = useMemo(() => {
     return cartItems.reduce((sum, item) => {
       const modifiersPerUnit = computeModifiersPerUnit(item.modifiers);
@@ -189,23 +303,64 @@ export default function OrdersPage() {
     }, 0);
   }, [cartItems]);
 
+  const cartCategoryCounters = useMemo(() => {
+    return cartItems.reduce((acc, item) => {
+      const key = item.productCategory;
+
+      if (!key) {
+        return acc;
+      }
+
+      acc[key] = (acc[key] ?? 0) + item.quantity;
+
+      return acc;
+    }, {});
+  }, [cartItems]);
+
+  const visibleCartCategoryCounters = useMemo(() => {
+    return categoryOrder
+      .map((category) => ({
+        category,
+        quantity: cartCategoryCounters[category] ?? 0,
+      }))
+      .filter((item) => item.quantity > 0);
+  }, [cartCategoryCounters, categoryOrder]);
+
   const selectedCustomer = useMemo(() => {
     return knownCustomers.find((customer) => customer.id === formData.customerId) ?? null;
   }, [formData.customerId, knownCustomers]);
 
+  const canCustomizeIngredients = isPizzaCategory(customization.productCategory);
+
   function addProductToCart(product) {
     setCartItems((prev) => {
-      const lineItemId = buildLineItemId();
+      const existingBaseItem = prev.find(
+        (item) => item.productId === product.id && isUnmodifiedCartItem(item)
+      );
+
+      if (existingBaseItem) {
+        return prev.map((item) =>
+          item.lineItemId === existingBaseItem.lineItemId
+            ? {
+              ...item,
+              quantity: item.quantity + 1,
+            }
+            : item
+        );
+      }
+
       const baseIngredients = getBaseIngredientsFromProduct(product);
 
       return [
         ...prev,
         {
-          lineItemId,
+          lineItemId: buildLineItemId(),
           productId: product.id,
           productName: product.name,
+          productCategory: product.category,
           quantity: 1,
           unitPriceCents: product.priceCents,
+          notes: "",
           baseIngredients,
           modifiers: [],
         },
@@ -220,8 +375,10 @@ export default function OrdersPage() {
       lineItemId: null,
       productId: product.id,
       productName: product.name,
+      productCategory: product.category,
       unitPriceCents: product.priceCents,
       quantity: 1,
+      notes: "",
       baseIngredients: cloneBaseIngredients(getBaseIngredientsFromProduct(product)),
       modifiers: [],
     });
@@ -234,8 +391,10 @@ export default function OrdersPage() {
       lineItemId: item.lineItemId,
       productId: item.productId,
       productName: item.productName,
+      productCategory: item.productCategory,
       unitPriceCents: item.unitPriceCents,
       quantity: item.quantity,
+      notes: item.notes ?? "",
       baseIngredients: cloneBaseIngredients(item.baseIngredients),
       modifiers: cloneModifiers(item.modifiers),
     });
@@ -313,8 +472,10 @@ export default function OrdersPage() {
       lineItemId: customization.mode === "edit" ? customization.lineItemId : buildLineItemId(),
       productId: customization.productId,
       productName: customization.productName,
+      productCategory: customization.productCategory,
       quantity: customization.quantity,
       unitPriceCents: customization.unitPriceCents,
+      notes: customization.notes,
       baseIngredients: cloneBaseIngredients(customization.baseIngredients),
       modifiers: cloneModifiers(customization.modifiers),
     };
@@ -336,9 +497,9 @@ export default function OrdersPage() {
       prev.map((item) =>
         item.lineItemId === lineItemId
           ? {
-              ...item,
-              quantity: item.quantity + 1,
-            }
+            ...item,
+            quantity: item.quantity + 1,
+          }
           : item
       )
     );
@@ -350,9 +511,9 @@ export default function OrdersPage() {
         .map((item) =>
           item.lineItemId === lineItemId
             ? {
-                ...item,
-                quantity: item.quantity - 1,
-              }
+              ...item,
+              quantity: item.quantity - 1,
+            }
             : item
         )
         .filter((item) => item.quantity > 0);
@@ -445,6 +606,23 @@ export default function OrdersPage() {
       return;
     }
 
+    if (!formData.businessDate) {
+      setActionError(new Error("Seleziona una data ordine valida."));
+      return;
+    }
+
+    if (!formData.expectedTimeSlot) {
+      setActionError(new Error("Seleziona un orario tra gli slot disponibili."));
+      return;
+    }
+
+    const expectedAt = buildExpectedAtIso(formData.businessDate, formData.expectedTimeSlot);
+
+    if (!expectedAt) {
+      setActionError(new Error("Orario ordine non valido."));
+      return;
+    }
+
     setSubmitting(true);
     setActionError(null);
 
@@ -452,11 +630,15 @@ export default function OrdersPage() {
       await createOrder({
         type: formData.type,
         customerId: formData.customerId || null,
+        businessDate: formData.businessDate,
+        expectedAt,
+        notes: formData.notes?.trim() ? formData.notes.trim() : null,
         totalAmountCents,
         items: cartItems.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
           unitPriceCents: item.unitPriceCents,
+          notes: item.notes?.trim() ? item.notes.trim() : null,
           modifiers: (item.modifiers ?? []).map((modifier) => ({
             ingredientId: modifier.ingredientId,
             action: modifier.action,
@@ -465,7 +647,7 @@ export default function OrdersPage() {
         })),
       });
 
-      setFormData(buildDefaultFormState());
+      setFormData(buildDefaultFormState(todayDate, availableTimeSlots));
       setCartItems([]);
       await reload();
     } catch (err) {
@@ -489,10 +671,13 @@ export default function OrdersPage() {
 
   return (
     <div className="space-y-5">
-      <section className="border border-slate-200 bg-white p-4 shadow-sm">
+      {/* Blocco principale: composizione nuovo ordine (catalogo + carrello) */}
+      <section className="bg-white p-4 shadow-sm">
         <form className="grid gap-4 xl:grid-cols-[1fr_360px]" onSubmit={handleCreateOrder}>
+          {/* Colonna sinistra: filtri e catalogo prodotti */}
           <div className="space-y-4">
-            <section className="grid gap-3 border-b border-slate-200 pb-4 lg:grid-cols-[minmax(260px,1fr)_180px_1fr]">
+            {/* Riga filtri ordine: cliente, tipo, data, orario, ricerca */}
+            <section className="grid gap-3 border-b border-slate-200 pb-4 md:grid-cols-2 xl:grid-cols-5">
               <label className="grid gap-1 text-sm text-slate-600">
                 Cliente
                 <select
@@ -522,6 +707,36 @@ export default function OrdersPage() {
               </label>
 
               <label className="grid gap-1 text-sm text-slate-600">
+                Data ordine
+                <input
+                  type="date"
+                  value={formData.businessDate}
+                  onChange={(event) =>
+                    setFormData((prev) => ({ ...prev, businessDate: event.target.value }))
+                  }
+                  className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
+                />
+              </label>
+
+              <label className="grid gap-1 text-sm text-slate-600">
+                Orario
+                <select
+                  value={formData.expectedTimeSlot}
+                  onChange={(event) =>
+                    setFormData((prev) => ({ ...prev, expectedTimeSlot: event.target.value }))
+                  }
+                  className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
+                >
+                  {availableTimeSlots.length === 0 && <option value="">Nessuno slot disponibile</option>}
+                  {availableTimeSlots.map((slot) => (
+                    <option key={slot} value={slot}>
+                      {slot}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-1 text-sm text-slate-600">
                 Cerca prodotto
                 <input
                   value={searchQuery}
@@ -532,9 +747,11 @@ export default function OrdersPage() {
               </label>
             </section>
 
+            {/* Sezione catalogo: categorie e griglia prodotti */}
             <section className="space-y-3">
+              {/* Filtri categoria prodotto */}
               <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-                {["ALL", "PIZZA", "BEVANDA", "FRITTO", "DOLCE", "ALTRO"].map((category) => {
+                {["ALL", ...categoryOrder].map((category) => {
                   const isActive = selectedCategory === category;
 
                   return (
@@ -548,7 +765,7 @@ export default function OrdersPage() {
                           : "border border-slate-300 bg-white px-3 py-1 text-xs font-semibold tracking-wide text-slate-600 hover:bg-slate-100"
                       }
                     >
-                      {getCategoryLabel(category)}
+                      {getCategoryLabel(category, categoryLabels)}
                     </button>
                   );
                 })}
@@ -560,7 +777,8 @@ export default function OrdersPage() {
                 <p className="text-sm text-slate-500">Nessun prodotto trovato per i filtri selezionati.</p>
               )}
 
-              {!productsLoading && visibleProducts.length > 0 && (
+              {!productsLoading && visibleProducts.length > 0 && selectedCategory !== "ALL" && (
+                /* Griglia card prodotto */
                 <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {visibleProducts.map((product) => (
                     <li key={product.id}>
@@ -574,12 +792,44 @@ export default function OrdersPage() {
                         className="grid w-full gap-1 border border-slate-200 bg-slate-50 px-3 py-3 text-left transition hover:bg-slate-100"
                       >
                         <span className="text-sm font-semibold text-slate-900">{product.name}</span>
-                        <span className="text-xs text-slate-500">{getCategoryLabel(product.category)}</span>
+                        <span className="text-xs text-slate-500">{getCategoryLabel(product.category, categoryLabels)}</span>
                         <span className="text-sm font-bold text-slate-700">{formatEuroLabel(product.priceCents)}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {!productsLoading && visibleProducts.length > 0 && selectedCategory === "ALL" && (
+                <div className="space-y-4">
+                  {groupedVisibleProducts.map((group) => (
+                    <section key={group.category} className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {getCategoryLabel(group.category, categoryLabels)}
+                      </h4>
+
+                      <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                        {group.items.map((product) => (
+                          <li key={product.id}>
+                            <button
+                              type="button"
+                              onClick={() => addProductToCart(product)}
+                              onContextMenu={(event) => {
+                                event.preventDefault();
+                                openCustomizationForProduct(product);
+                              }}
+                              className="grid w-full gap-1 border border-slate-200 bg-slate-50 px-3 py-3 text-left transition hover:bg-slate-100"
+                            >
+                              <span className="text-sm font-semibold text-slate-900">{product.name}</span>
+                              <span className="text-xs text-slate-500">{getCategoryLabel(product.category, categoryLabels)}</span>
+                              <span className="text-sm font-bold text-slate-700">{formatEuroLabel(product.priceCents)}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
               )}
 
               <p className="text-xs text-slate-500">
@@ -588,19 +838,47 @@ export default function OrdersPage() {
             </section>
           </div>
 
+          {/* Colonna destra: riepilogo carrello e conferma ordine */}
           <aside className="border border-slate-200 bg-slate-50 p-3">
+            {/* Testata carrello con dati sintetici ordine */}
             <div className="mb-3 border-b border-slate-200 pb-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Nuovo ordine</p>
-              <p className="text-sm font-semibold text-slate-900">
-                {selectedCustomer ? selectedCustomer.name : "Cliente al banco"}
-              </p>
-              <p className="text-xs text-slate-500">{formData.type}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Nuovo ordine</p>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {selectedCustomer ? selectedCustomer.name : "Cliente al banco"}
+                  </p>
+                  <p className="text-xs text-slate-500">{formData.type}</p>
+                  <p className="text-xs text-slate-500">Data: {formatDateLabel(formData.businessDate)}</p>
+                  <p className="text-xs text-slate-500">Orario: {formData.expectedTimeSlot || "-"}</p>
+                </div>
+
+                <div className="flex flex-col gap-1 text-right">
+                  {visibleCartCategoryCounters.map((counter) => (
+                    <span key={counter.category} className="text-[11px] font-semibold text-slate-500">
+                      {getCategoryLabel(counter.category, categoryLabels)}: {counter.quantity}
+                    </span>
+                  ))}
+                </div>
+              </div>
             </div>
 
-            <ul className="max-h-[440px] space-y-2 overflow-auto pr-1">
+            {/* Lista righe carrello */}
+            <ul className="max-h-[560px] space-y-2 overflow-auto pr-1">
               {cartItems.map((item) => (
                 <li key={item.lineItemId} className="border border-slate-200 bg-white p-2">
-                  <p className="text-sm font-semibold text-slate-900">{item.productName}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-900">{item.productName}</p>
+                    <button
+                      type="button"
+                      onClick={() => removeCartItem(item.lineItemId)}
+                      className="inline-flex items-center justify-center text-rose-700"
+                      aria-label="Rimuovi riga dal carrello"
+                      title="Rimuovi"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
 
                   {Array.isArray(item.modifiers) && item.modifiers.length > 0 && (
                     <ul className="mt-1 space-y-0.5 text-[11px] text-slate-500">
@@ -612,9 +890,12 @@ export default function OrdersPage() {
                     </ul>
                   )}
 
+                  {item.notes?.trim() && <p className="mt-1 text-xs text-slate-500">Nota: {item.notes}</p>}
+
                   <p className="text-xs text-slate-500">{formatEuroLabel(item.unitPriceCents)} cad.</p>
 
                   <div className="mt-2 flex items-center justify-between gap-2">
+                    {/* Controlli quantita riga */}
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
@@ -633,6 +914,7 @@ export default function OrdersPage() {
                       </button>
                     </div>
 
+                    {/* Totali riga e azioni */}
                     <div className="text-right">
                       <p className="text-[11px] text-slate-500">
                         Variazioni: {formatEuroLabel(computeModifiersPerUnit(item.modifiers))}
@@ -642,20 +924,15 @@ export default function OrdersPage() {
                           item.quantity * (item.unitPriceCents + computeModifiersPerUnit(item.modifiers))
                         )}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => removeCartItem(item.lineItemId)}
-                        className="text-xs font-medium text-rose-700"
-                      >
-                        Rimuovi
-                      </button>
 
                       <button
                         type="button"
                         onClick={() => openCustomizationForCartItem(item)}
-                        className="text-xs font-medium text-slate-700"
+                        className="inline-flex items-center justify-center text-slate-700"
+                        aria-label="Personalizza riga carrello"
+                        title="Personalizza"
                       >
-                        Personalizza
+                        <Pencil size={14} />
                       </button>
                     </div>
                   </div>
@@ -667,7 +944,19 @@ export default function OrdersPage() {
               <p className="py-6 text-center text-sm text-slate-500">Seleziona prodotti per riempire il carrello.</p>
             )}
 
+            {/* Footer carrello: totale ordine + submit */}
             <div className="mt-3 border-t border-slate-200 pt-3">
+              <label className="mb-3 grid gap-1 text-sm text-slate-600">
+                Nota ordine
+                <textarea
+                  value={formData.notes}
+                  onChange={(event) => setFormData((prev) => ({ ...prev, notes: event.target.value }))}
+                  rows={2}
+                  placeholder="Es. Vuole POS, Pagato, ben cotte..."
+                  className="border border-slate-200 bg-white px-2 py-2 text-sm"
+                />
+              </label>
+
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-sm font-semibold text-slate-600">Totale</span>
                 <span className="text-xl font-bold text-slate-900">{formatEuroLabel(totalAmountCents)}</span>
@@ -685,15 +974,18 @@ export default function OrdersPage() {
         </form>
       </section>
 
+      {/* Messaggi errore pagina */}
       {error && <p className="text-sm text-red-600">{error.message}</p>}
       {actionError && <p className="text-sm text-red-600">{actionError.message}</p>}
 
+      {/* Modal personalizzazione prodotto/riga carrello */}
       {customization.isOpen && (
         <Modal
           title={customization.mode === "add" ? "Personalizza prodotto" : "Modifica personalizzazione"}
           onClose={closeCustomizationModal}
         >
           <div className="space-y-3">
+            {/* Header modal: nome prodotto e prezzo base */}
             <div className="border border-slate-200 bg-slate-50 p-3">
               <p className="text-sm font-semibold text-slate-900">{customization.productName}</p>
               <p className="text-xs text-slate-500">Prezzo base: {formatEuroLabel(customization.unitPriceCents)}</p>
@@ -710,7 +1002,23 @@ export default function OrdersPage() {
               />
             </label>
 
-            {Array.isArray(customization.baseIngredients) && customization.baseIngredients.length > 0 && (
+            <label className="grid gap-1 text-sm text-slate-600">
+              Note
+              <textarea
+                value={customization.notes}
+                onChange={(event) =>
+                  setCustomization((prev) => ({ ...prev, notes: event.target.value }))
+                }
+                rows={2}
+                placeholder="Es. ben cotta, consegna al citofono..."
+                className="border border-slate-200 bg-white px-2 py-2 text-sm"
+              />
+            </label>
+
+            {canCustomizeIngredients &&
+              Array.isArray(customization.baseIngredients) &&
+              customization.baseIngredients.length > 0 && (
+              /* Sezione ingredienti base (rimozioni) */
               <section className="space-y-1 border border-slate-200 bg-slate-50 p-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ingredienti base</p>
                 {customization.baseIngredients.map((ingredient) => {
@@ -736,47 +1044,51 @@ export default function OrdersPage() {
               </section>
             )}
 
-            <section className="space-y-1 border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Extra ingredienti</p>
-              <div className="flex flex-wrap gap-1">
-                {ingredients
-                  .filter(
-                    (ingredient) =>
-                      !(customization.baseIngredients ?? []).some((base) => base.id === ingredient.id)
-                  )
-                  .map((ingredient) => {
-                    const isAdded = (customization.modifiers ?? []).some(
-                      (modifier) =>
-                        modifier.action === "AGGIUNGI" && modifier.ingredientId === ingredient.id
-                    );
+            {canCustomizeIngredients && (
+              /* Sezione extra ingredienti (aggiunte) */
+              <section className="space-y-1 border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Extra ingredienti</p>
+                <div className="flex flex-wrap gap-1">
+                  {ingredients
+                    .filter(
+                      (ingredient) =>
+                        !(customization.baseIngredients ?? []).some((base) => base.id === ingredient.id)
+                    )
+                    .map((ingredient) => {
+                      const isAdded = (customization.modifiers ?? []).some(
+                        (modifier) =>
+                          modifier.action === "AGGIUNGI" && modifier.ingredientId === ingredient.id
+                      );
 
-                    if (isAdded) {
+                      if (isAdded) {
+                        return (
+                          <button
+                            key={ingredient.id}
+                            type="button"
+                            onClick={() => removeCustomizationExtraIngredient(ingredient.id)}
+                            className="border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700"
+                          >
+                            {ingredient.name} +{formatEuroLabel(ingredient.extraPriceCents)}
+                          </button>
+                        );
+                      }
+
                       return (
                         <button
                           key={ingredient.id}
                           type="button"
-                          onClick={() => removeCustomizationExtraIngredient(ingredient.id)}
-                          className="border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700"
+                          onClick={() => addCustomizationExtraIngredient(ingredient.id)}
+                          className="border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700"
                         >
-                          {ingredient.name} +{formatEuroLabel(ingredient.extraPriceCents)}
+                          + {ingredient.name}
                         </button>
                       );
-                    }
+                    })}
+                </div>
+              </section>
+            )}
 
-                    return (
-                      <button
-                        key={ingredient.id}
-                        type="button"
-                        onClick={() => addCustomizationExtraIngredient(ingredient.id)}
-                        className="border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700"
-                      >
-                        + {ingredient.name}
-                      </button>
-                    );
-                  })}
-              </div>
-            </section>
-
+            {/* Riepilogo economico personalizzazione */}
             <div className="flex items-center justify-between border-t border-slate-200 pt-3">
               <div>
                 <p className="text-xs text-slate-500">Variazioni</p>
@@ -790,12 +1102,13 @@ export default function OrdersPage() {
                 <p className="text-lg font-bold text-slate-900">
                   {formatEuroLabel(
                     customization.quantity *
-                      (customization.unitPriceCents + computeModifiersPerUnit(customization.modifiers))
+                    (customization.unitPriceCents + computeModifiersPerUnit(customization.modifiers))
                   )}
                 </p>
               </div>
             </div>
 
+            {/* Azioni modal */}
             <div className="flex justify-end gap-2 border-t border-slate-200 pt-3">
               <button
                 type="button"
@@ -817,7 +1130,9 @@ export default function OrdersPage() {
         </Modal>
       )}
 
-      <section className="space-y-3">
+      {/* Sezione inferiore: storico/lista ordini */}
+      <section className="space-y-3 p-3">
+        {/* Header lista ordini con azione reload */}
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Lista ordini</h3>
           <button type="button" onClick={() => reload()} className="text-sm font-medium text-slate-700">
@@ -829,18 +1144,22 @@ export default function OrdersPage() {
 
         {!loading && orders.length === 0 && <p className="text-sm text-slate-500">Nessun ordine disponibile.</p>}
 
+        {/* Elenco ordini esistenti */}
         <ul className="space-y-2">
           {orders.map((order) => (
             <li key={order.id} className="border border-slate-200 bg-white p-3 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
+                {/* Colonna info ordine */}
                 <div>
                   <p className="text-sm font-semibold text-slate-900">
                     #{order.dailyNumber} - {order.type}
                   </p>
                   <p className="text-xs text-slate-500">Cliente: {order.customer?.name ?? "Banco"}</p>
                   <p className="text-xs text-slate-500">Stato: {order.status}</p>
+                  <p className="text-xs text-slate-500">Ritiro/Consegna: {formatDateTimeLabel(order.expectedAt)}</p>
                 </div>
 
+                {/* Colonna azioni transizione stato */}
                 <div className="flex gap-2">
                   {(NEXT_STATUS_OPTIONS[order.status] ?? []).map((nextStatus) => (
                     <button

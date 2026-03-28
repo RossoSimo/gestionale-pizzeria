@@ -54,6 +54,19 @@ function ensureInteger(value, field) {
   }
 }
 
+function normalizeOptionalNotes(value, field) {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw buildValidationError(`Campo non valido: ${field}`, { field });
+  }
+
+  const normalizedValue = value.trim();
+  return normalizedValue ? normalizedValue : null;
+}
+
 function computeTotalAmountCents(items) {
   // Total is recomputed server-side to prevent trusting client-provided amounts.
   return items.reduce((orderTotal, item) => {
@@ -124,6 +137,7 @@ function validateCreateOrderInput(input) {
 
   return {
     ...input,
+    notes: normalizeOptionalNotes(input.notes, "notes"),
     status: input.status && VALID_ORDER_STATUS.has(input.status) ? input.status : "IN_ATTESA",
   };
 }

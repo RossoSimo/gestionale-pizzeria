@@ -1,6 +1,4 @@
 function createProductService(productRepository) {
-  const validCategories = new Set(["PIZZA", "BEVANDA", "FRITTO", "DOLCE", "ALTRO"]);
-
   /**
    * Creates standardized validation errors for product operations.
    */
@@ -39,10 +37,7 @@ function createProductService(productRepository) {
 
     ensureString(payload.name, "name");
     ensureInteger(payload.priceCents, "priceCents");
-
-    if (!validCategories.has(payload.category)) {
-      throw buildValidationError("Categoria prodotto non valida", { field: "category" });
-    }
+    ensureString(payload.category, "category");
 
     if (payload.ingredientIds != null && !Array.isArray(payload.ingredientIds)) {
       throw buildValidationError("ingredientIds deve essere un array", { field: "ingredientIds" });
@@ -65,7 +60,7 @@ function createProductService(productRepository) {
           ? payload.description.trim()
           : null,
       priceCents: payload.priceCents,
-      category: payload.category,
+      category: payload.category.trim(),
       ingredientIds: payload.category === "PIZZA" ? dedupedIngredientIds : [],
     };
   }
@@ -83,8 +78,8 @@ function createProductService(productRepository) {
         mappedFilters.search = filters.search.trim();
       }
 
-      if (typeof filters.category === "string" && validCategories.has(filters.category)) {
-        mappedFilters.category = filters.category;
+      if (typeof filters.category === "string" && filters.category.trim()) {
+        mappedFilters.category = filters.category.trim();
       }
 
       return productRepository.list(mappedFilters);

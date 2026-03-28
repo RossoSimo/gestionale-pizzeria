@@ -16,14 +16,6 @@ enum SyncStatus {
   CONFLICT
 }
 
-enum ProductCategory {
-  PIZZA
-  BEVANDA
-  FRITTO
-  DOLCE
-  ALTRO
-}
-
 enum OrderStatus {
   IN_ATTESA
   IN_PREPARAZIONE
@@ -41,6 +33,16 @@ enum OrderType {
 enum ModifierAction {
   AGGIUNGI
   RIMUOVI
+}
+
+enum Weekday {
+  LUNEDI
+  MARTEDI
+  MERCOLEDI
+  GIOVEDI
+  VENERDI
+  SABATO
+  DOMENICA
 }
 
 // ------------------------------------------------------------------
@@ -75,7 +77,7 @@ model Product {
   name        String          // Es: "Margherita", "Coca Cola 33cl"
   description String?
   priceCents  Int
-  category    ProductCategory
+  category    String
   
   orderItems  OrderItem[]
   productIngredients ProductIngredient[]
@@ -148,6 +150,7 @@ model Order {
   status           OrderStatus
   type             OrderType
   totalAmountCents Int
+  notes            String?     // Nota generale dell'ordine
   
   expectedAt       DateTime? // Orario di ritiro o consegna richiesto
   
@@ -220,6 +223,49 @@ model OrderItemModifier {
 
   @@index([orderItemId])
   @@index([ingredientId])
+  @@index([updatedAt])
+  @@index([deletedAt])
+  @@index([syncStatus])
+}
+
+model AppSettings {
+  id            String     @id @default("default")
+  openingTime   String     @default("18:00")
+  closingTime   String     @default("23:00")
+  slotMinutes   Int        @default(20)
+  categoryPizzaLabel   String @default("Pizze")
+  categoryBevandaLabel String @default("Bevanda")
+  categoryAltroLabel   String @default("Altro")
+  extraCategoriesJson  String @default("[]")
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  version       Int        @default(1)
+  syncStatus    SyncStatus @default(PENDING)
+  lastSyncedAt  DateTime?
+
+  businessDays  BusinessDaySettings[]
+}
+
+model BusinessDaySettings {
+  id            String     @id @default(uuid())
+  settingsId    String     @default("default")
+  settings      AppSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade)
+
+  weekday       Weekday    @unique
+  isOpen        Boolean    @default(true)
+  openingTime   String     @default("18:00")
+  closingTime   String     @default("23:00")
+  slotMinutes   Int        @default(20)
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  deletedAt     DateTime?
+  version       Int        @default(1)
+  syncStatus    SyncStatus @default(PENDING)
+  lastSyncedAt  DateTime?
+
+  @@index([settingsId])
   @@index([updatedAt])
   @@index([deletedAt])
   @@index([syncStatus])

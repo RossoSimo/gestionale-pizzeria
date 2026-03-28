@@ -42,13 +42,13 @@ export default function AppLayout() {
   const pageTitle = getPageTitle(location.pathname);
 
   const gridClass = isCollapsed
-    ? "mx-auto grid min-h-screen w-full grid-cols-1 bg-slate-100 md:grid-cols-[84px_1fr]"
-    : "mx-auto grid min-h-screen w-full grid-cols-1 bg-slate-100 md:grid-cols-[280px_1fr]";
+    ? "mx-auto grid h-screen w-full grid-cols-1 bg-slate-100 md:grid-cols-[84px_1fr]"
+    : "mx-auto grid h-screen w-full grid-cols-1 bg-slate-100 md:grid-cols-[280px_1fr]";
 
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-900 [font-family:'Trebuchet_MS','Segoe_UI',sans-serif]">
+    <main className="h-screen overflow-hidden bg-slate-100 text-slate-900 [font-family:'Trebuchet_MS','Segoe_UI',sans-serif]">
       <section className={gridClass}>
-        <aside className="flex min-h-screen flex-col border-r border-slate-200 bg-slate-50 px-3 py-4 md:px-5">
+        <aside className="sticky top-0 flex h-screen flex-col overflow-y-auto border-r border-slate-200 bg-slate-50 px-3 py-4 md:px-5">
           <header className="mb-5 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Waves size={22} className="text-indigo-500" />
@@ -94,8 +94,8 @@ export default function AppLayout() {
           </div>
         </aside>
 
-        <section className="grid min-h-screen grid-rows-[72px_1fr] bg-white">
-          <header className="flex items-center justify-between border-b border-slate-200 px-8">
+        <section className="grid h-screen grid-rows-[72px_minmax(0,1fr)] bg-white">
+          <header className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-8">
             <div className="flex min-w-0 items-center gap-3 text-slate-500">
               <h2 className="text-lg font-semibold text-slate-700">{pageTitle}</h2>
             </div>
@@ -113,8 +113,8 @@ export default function AppLayout() {
             </div>
           </header>
 
-          <section className="p-8">
-            <div className="min-h-[500px] border border-dashed border-slate-300 bg-[repeating-linear-gradient(135deg,_#f8fafc,_#f8fafc_8px,_#f1f5f9_8px,_#f1f5f9_16px)] p-4">
+          <section className="overflow-y-auto">
+            <div className="min-h-[500px] p-3">
               <Outlet />
             </div>
           </section>

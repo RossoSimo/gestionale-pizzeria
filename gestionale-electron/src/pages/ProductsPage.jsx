@@ -1,8 +1,25 @@
 import { useMemo, useState } from "react";
 import { useIngredients } from "../features/ingredients/hooks/useIngredients";
 import { useProducts } from "../features/products/hooks/useProducts";
+import { useAppSettings } from "../features/settings/hooks/useAppSettings";
 import { createIngredient, deleteIngredient, updateIngredient } from "../services/ipc/ingredients.ipc";
 import { createProduct, deleteProduct, updateProduct } from "../services/ipc/products.ipc";
+
+const BASE_CATEGORY_ORDER = ["PIZZA", "BEVANDA", "ALTRO"];
+
+function getCategoryLabel(category, categoryLabels) {
+  if (categoryLabels && typeof categoryLabels[category] === "string" && categoryLabels[category].trim()) {
+    return categoryLabels[category].trim();
+  }
+
+  const defaults = {
+    PIZZA: "Pizze",
+    BEVANDA: "Bevanda",
+    ALTRO: "Altro",
+  };
+
+  return defaults[category] ?? category;
+}
 
 function buildDefaultFormState() {
   return {
@@ -67,6 +84,7 @@ function Modal({ title, onClose, children }) {
 
 export default function ProductsPage() {
   const { products, loading, error, reload } = useProducts();
+  const { settings: appSettings } = useAppSettings();
   const {
     ingredients,
     loading: ingredientsLoading,
@@ -86,6 +104,35 @@ export default function ProductsPage() {
 
   const isEditing = Boolean(formData.id);
   const isEditingIngredient = Boolean(ingredientForm.id);
+
+  const categoryOrder = useMemo(() => {
+    const settingKeys = Object.keys(appSettings?.categoryLabels ?? {});
+    const productKeys = products.map((product) => product.category).filter(Boolean);
+    const unique = new Set([...BASE_CATEGORY_ORDER, ...settingKeys, ...productKeys]);
+    const ordered = Array.from(unique);
+
+    return ordered.sort((a, b) => {
+      const aBaseIndex = BASE_CATEGORY_ORDER.indexOf(a);
+      const bBaseIndex = BASE_CATEGORY_ORDER.indexOf(b);
+
+      if (aBaseIndex >= 0 && bBaseIndex >= 0) {
+        return aBaseIndex - bBaseIndex;
+      }
+
+      if (aBaseIndex >= 0) {
+        return -1;
+      }
+
+      if (bBaseIndex >= 0) {
+        return 1;
+      }
+
+      return getCategoryLabel(a, appSettings?.categoryLabels).localeCompare(
+        getCategoryLabel(b, appSettings?.categoryLabels),
+        "it-IT"
+      );
+    });
+  }, [appSettings?.categoryLabels, products]);
 
   const ingredientsById = useMemo(() => {
     return new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
@@ -136,7 +183,11 @@ export default function ProductsPage() {
   }
 
   function openCreateProductModal() {
-    resetProductForm();
+      resetProductForm();
+      setFormData((prev) => ({
+        ...prev,
+        category: categoryOrder[0] ?? "PIZZA",
+      }));
     setProductIngredientSearch("");
     setIsProductModalOpen(true);
   }
@@ -332,7 +383,7 @@ export default function ProductsPage() {
               <div>
                 <p className="text-sm font-semibold text-slate-900">{product.name}</p>
                 <p className="text-xs text-slate-500">
-                  {product.category} - {formatCentsToEuroLabel(product.priceCents)}
+                  {getCategoryLabel(product.category, appSettings?.categoryLabels)} - {formatCentsToEuroLabel(product.priceCents)}
                 </p>
                 {Array.isArray(product.productIngredients) && product.productIngredients.length > 0 && (
                   <p className="text-xs text-slate-500">
@@ -476,11 +527,11 @@ export default function ProductsPage() {
                 }
                 className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
               >
-                <option value="PIZZA">Pizza</option>
-                <option value="BEVANDA">Bevanda</option>
-                <option value="FRITTO">Fritto</option>
-                <option value="DOLCE">Dolce</option>
-                <option value="ALTRO">Altro</option>
+                {categoryOrder.map((categoryKey) => (
+                  <option key={categoryKey} value={categoryKey}>
+                    {getCategoryLabel(categoryKey, appSettings?.categoryLabels)}
+                  </option>
+                ))}
               </select>
             </label>
 
@@ -526,7 +577,7 @@ export default function ProductsPage() {
                   type="text"
                   value={productIngredientSearch}
                   onChange={(event) => setProductIngredientSearch(event.target.value)}
-                  placeholder="Cerca ingrediente nel modal..."
+                  placeholder="Cerca ingrediente..."
                   className="w-full border border-slate-200 bg-white px-2 py-2 text-sm"
                 />
                 {ingredients.length === 0 ? (

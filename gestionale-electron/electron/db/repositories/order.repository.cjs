@@ -124,6 +124,7 @@ function createOrderRepository(db) {
             status: input.status,
             type: input.type,
             totalAmountCents: input.totalAmountCents,
+            notes: input.notes ?? null,
             expectedAt,
             customerId: input.customerId ?? null,
             syncStatus: "PENDING",

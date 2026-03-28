@@ -48,6 +48,24 @@ function createBridgeUnavailableError(methodName) {
 
 function createBrowserFallbackBridge() {
   return {
+    getAppSettings: async () => ({
+      openingTime: "18:00",
+      closingTime: "22:00",
+      slotMinutes: 20,
+      weeklySchedule: [
+        { weekday: "LUNEDI", isOpen: true, openingTime: "18:00", closingTime: "22:00", slotMinutes: 20 },
+        { weekday: "MARTEDI", isOpen: true, openingTime: "18:00", closingTime: "22:00", slotMinutes: 20 },
+        { weekday: "MERCOLEDI", isOpen: true, openingTime: "18:00", closingTime: "22:00", slotMinutes: 20 },
+        { weekday: "GIOVEDI", isOpen: true, openingTime: "18:00", closingTime: "22:00", slotMinutes: 20 },
+        { weekday: "VENERDI", isOpen: true, openingTime: "18:00", closingTime: "22:00", slotMinutes: 20 },
+        { weekday: "SABATO", isOpen: true, openingTime: "18:00", closingTime: "22:00", slotMinutes: 20 },
+        { weekday: "DOMENICA", isOpen: true, openingTime: "18:00", closingTime: "22:00", slotMinutes: 20 },
+      ],
+      meta: { source: "browser-fallback" },
+    }),
+    updateAppSettings: async () => {
+      throw createBridgeUnavailableError("updateAppSettings");
+    },
     // Read-only views can still render in pure browser mode using empty datasets.
     listOrders: async () => ({ data: [], meta: { source: "browser-fallback" } }),
     listProducts: async () => ({ data: [], meta: { source: "browser-fallback" } }),

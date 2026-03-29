@@ -17,32 +17,32 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
+      <h2 className="text-2xl font-bold tracking-tight text-teal-800">Dashboard</h2>
 
       <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
-        <article className="bg-white p-4 shadow-sm">
+        <article className="ui-surface border-l-4 border-l-teal-500 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">Ordini totali</p>
           <p className="mt-2 text-2xl font-bold text-slate-900">{ordersLoading ? "..." : orders.length}</p>
         </article>
 
-        <article className="bg-white p-4 shadow-sm">
+        <article className="ui-surface border-l-4 border-l-amber-500 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">In attesa</p>
           <p className="mt-2 text-2xl font-bold text-slate-900">{ordersLoading ? "..." : pendingOrders}</p>
         </article>
 
-        <article className="bg-white p-4 shadow-sm">
+        <article className="ui-surface border-l-4 border-l-sky-500 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">In preparazione</p>
           <p className="mt-2 text-2xl font-bold text-slate-900">{ordersLoading ? "..." : inPrepOrders}</p>
         </article>
 
-        <article className="bg-white p-4 shadow-sm">
+        <article className="ui-surface border-l-4 border-l-emerald-500 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">Incasso ordini</p>
           <p className="mt-2 text-2xl font-bold text-slate-900">
             {ordersLoading ? "..." : formatEuroLabel(totalRevenueCents)}
           </p>
         </article>
 
-        <article className="bg-white p-4 shadow-sm">
+        <article className="ui-surface border-l-4 border-l-indigo-500 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">Scontrino medio</p>
           <p className="mt-2 text-2xl font-bold text-slate-900">
             {ordersLoading ? "..." : formatEuroLabel(averageOrderCents)}
@@ -50,7 +50,7 @@ export default function DashboardPage() {
         </article>
       </section>
 
-      <section className="bg-white p-4 shadow-sm">
+      <section className="ui-surface border-l-4 border-l-teal-500 p-4">
         <p className="text-xs uppercase tracking-wide text-slate-500">Catalogo prodotti</p>
         <p className="mt-2 text-2xl font-bold text-slate-900">{productsLoading ? "..." : products.length}</p>
       </section>

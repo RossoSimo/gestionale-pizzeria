@@ -44,6 +44,14 @@ function registerOrderHandlers(ipcMain, channels, orderService) {
     }
   });
 
+  ipcMain.handle(channels.ORDERS_UPDATE, async (_event, payload) => {
+    try {
+      return await orderService.updateOrder(payload);
+    } catch (error) {
+      throwNormalizedIpcError(error);
+    }
+  });
+
   ipcMain.handle(channels.ORDERS_UPDATE_STATUS, async (_event, payload) => {
     try {
       return await orderService.updateOrderStatus(payload);

@@ -345,13 +345,13 @@ export default function ProductsPage() {
     <div className="space-y-5">
       <h2 className="text-2xl font-bold tracking-tight">Prodotti</h2>
 
-      <section className="space-y-3 border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="ui-surface space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Catalogo prodotti</h3>
           <button
             type="button"
             onClick={openCreateProductModal}
-            className="bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
+            className="ui-btn ui-btn-success"
           >
             Aggiungi prodotto
           </button>
@@ -399,7 +399,7 @@ export default function ProductsPage() {
                 <button
                   type="button"
                   onClick={() => openEditProductModal(product)}
-                  className="bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700"
+                  className="ui-btn ui-btn-neutral px-2 py-1 text-xs"
                 >
                   Modifica
                 </button>
@@ -407,7 +407,7 @@ export default function ProductsPage() {
                 <button
                   type="button"
                   onClick={() => handleDeleteProduct(product.id)}
-                  className="bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700"
+                  className="ui-btn ui-btn-danger px-2 py-1 text-xs"
                 >
                   Elimina
                 </button>
@@ -417,13 +417,13 @@ export default function ProductsPage() {
         </ul>
       </section>
 
-      <section className="space-y-3 border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="ui-surface space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Ingredienti</h3>
           <button
             type="button"
             onClick={openCreateIngredientModal}
-            className="bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
+            className="ui-btn ui-btn-success"
           >
             Aggiungi ingrediente
           </button>
@@ -477,14 +477,14 @@ export default function ProductsPage() {
                         <button
                           type="button"
                           onClick={() => openEditIngredientModal(ingredient)}
-                          className="bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700"
+                          className="ui-btn ui-btn-neutral px-2 py-1 text-xs"
                         >
                           Modifica
                         </button>
                         <button
                           type="button"
                           onClick={() => handleDeleteIngredient(ingredient.id)}
-                          className="bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700"
+                          className="ui-btn ui-btn-danger px-2 py-1 text-xs"
                         >
                           Elimina
                         </button>
@@ -562,7 +562,7 @@ export default function ProductsPage() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                className="ui-btn ui-btn-success px-4 py-2 text-sm"
               >
                 {submitting ? "Salvataggio..." : isEditing ? "Salva modifiche" : "Aggiungi prodotto"}
               </button>
@@ -668,7 +668,7 @@ export default function ProductsPage() {
               <button
                 type="submit"
                 disabled={ingredientSubmitting}
-                className="bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                className="ui-btn ui-btn-success px-4 py-2 text-sm"
               >
                 {ingredientSubmitting ? "Salvataggio..." : isEditingIngredient ? "Salva modifiche" : "Aggiungi ingrediente"}
               </button>

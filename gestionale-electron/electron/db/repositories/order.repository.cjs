@@ -31,6 +31,19 @@ function createOrderRepository(db) {
     throw new Error("DB client non inizializzato in createOrderRepository");
   }
 
+  const activeItemsInclude = {
+    where: {
+      deletedAt: null,
+    },
+    include: {
+      modifiers: {
+        where: {
+          deletedAt: null,
+        },
+      },
+    },
+  };
+
   return {
     async list(options = {}) {
       // List supports operational filters used by kitchen/counter views.
@@ -70,11 +83,7 @@ function createOrderRepository(db) {
           take: pageSize,
           include: {
             customer: true,
-            items: {
-              include: {
-                modifiers: true,
-              },
-            },
+            items: activeItemsInclude,
           },
         }),
       ]);
@@ -148,11 +157,92 @@ function createOrderRepository(db) {
           },
           include: {
             customer: true,
-            items: {
-              include: {
-                modifiers: true,
-              },
+            items: activeItemsInclude,
+          },
+        });
+      });
+    },
+
+    async update(orderId, input) {
+      const businessDate = normalizeBusinessDate(input.businessDate);
+      const expectedAt = input.expectedAt ? new Date(input.expectedAt) : null;
+      const now = new Date();
+
+      return db.$transaction(async (tx) => {
+        const existingOrder = await tx.order.findFirst({
+          where: {
+            id: orderId,
+            deletedAt: null,
+          },
+        });
+
+        if (!existingOrder) {
+          const error = new Error("Ordine non trovato");
+          error.code = "ORDER_NOT_FOUND";
+          throw error;
+        }
+
+        await tx.orderItemModifier.updateMany({
+          where: {
+            deletedAt: null,
+            orderItem: {
+              orderId,
+              deletedAt: null,
             },
+          },
+          data: {
+            deletedAt: now,
+            syncStatus: "PENDING",
+          },
+        });
+
+        await tx.orderItem.updateMany({
+          where: {
+            orderId,
+            deletedAt: null,
+          },
+          data: {
+            deletedAt: now,
+            syncStatus: "PENDING",
+          },
+        });
+
+        return tx.order.update({
+          where: {
+            id: orderId,
+          },
+          data: {
+            businessDate,
+            type: input.type,
+            totalAmountCents: input.totalAmountCents,
+            notes: input.notes ?? null,
+            expectedAt,
+            customerId: input.customerId ?? null,
+            version: {
+              increment: 1,
+            },
+            syncStatus: "PENDING",
+            items: {
+              create: input.items.map((item) => ({
+                quantity: item.quantity,
+                unitPriceCents: item.unitPriceCents,
+                notes: item.notes ?? null,
+                productId: item.productId,
+                syncStatus: "PENDING",
+                modifiers: {
+                  create: (item.modifiers ?? []).map((modifier) => ({
+                    action: modifier.action,
+                    priceAppliedCents: modifier.priceAppliedCents,
+                    ingredientId: modifier.ingredientId,
+                    syncStatus: "PENDING",
+                  })),
+                },
+              })),
+            },
+          },
+          include: {
+            customer: true,
+            items: activeItemsInclude,
           },
         });
       });

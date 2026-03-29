@@ -24,8 +24,8 @@ const navItems = [
 
 function navClassName({ isActive }) {
   return isActive
-    ? `${navBaseClass} bg-indigo-50 text-indigo-600`
-    : `${navBaseClass} text-slate-700 hover:bg-slate-100`;
+    ? `${navBaseClass} border-l-2 border-emerald-500 bg-emerald-50 text-emerald-700`
+    : `${navBaseClass} text-slate-700 hover:bg-teal-50`;
 }
 
 function getPageTitle(pathname) {
@@ -48,17 +48,17 @@ export default function AppLayout() {
   return (
     <main className="h-screen overflow-hidden bg-slate-100 text-slate-900 [font-family:'Trebuchet_MS','Segoe_UI',sans-serif]">
       <section className={gridClass}>
-        <aside className="sticky top-0 flex h-screen flex-col overflow-y-auto border-r border-slate-200 bg-slate-50 px-3 py-4 md:px-5">
+        <aside className="sticky top-0 flex h-screen flex-col overflow-y-auto border-r border-teal-100 bg-gradient-to-b from-teal-50 to-white px-3 py-4 md:px-5">
           <header className="mb-5 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Waves size={22} className="text-indigo-500" />
+              <Waves size={22} className="text-teal-600" />
               {!isCollapsed && <span className="text-sm font-semibold text-slate-800">Gestionale</span>}
             </div>
 
             <button
               type="button"
               onClick={() => setIsCollapsed((prev) => !prev)}
-              className="p-2 text-slate-500 transition hover:bg-slate-200"
+              className="p-2 text-slate-500 transition hover:bg-teal-100"
               aria-label={isCollapsed ? "Espandi sidebar" : "Collassa sidebar"}
               title={isCollapsed ? "Espandi sidebar" : "Collassa sidebar"}
             >
@@ -79,7 +79,7 @@ export default function AppLayout() {
                   aria-label={item.label}
                   title={isCollapsed ? item.label : undefined}
                 >
-                  <Icon size={18} className="shrink-0 text-slate-400" />
+                  <Icon size={18} className="shrink-0 text-teal-500" />
                   {!isCollapsed && <span className="truncate">{item.label}</span>}
                 </NavLink>
               );
@@ -88,23 +88,23 @@ export default function AppLayout() {
 
           <div className="mt-auto pt-6">
             <NavLink to="/settings" className={navClassName} title={isCollapsed ? "Impostazioni" : undefined}>
-              <Settings size={18} className="shrink-0 text-slate-400" />
+              <Settings size={18} className="shrink-0 text-teal-500" />
               {!isCollapsed && <span>Settings</span>}
             </NavLink>
           </div>
         </aside>
 
-        <section className="grid h-screen grid-rows-[72px_minmax(0,1fr)] bg-white">
-          <header className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-8">
+        <section className="grid h-screen grid-rows-[72px_minmax(0,1fr)] bg-slate-50">
+          <header className="sticky top-0 z-20 flex items-center justify-between border-b border-teal-100 bg-white px-8">
             <div className="flex min-w-0 items-center gap-3 text-slate-500">
-              <h2 className="text-lg font-semibold text-slate-700">{pageTitle}</h2>
+              <h2 className="text-lg font-semibold text-teal-700">{pageTitle}</h2>
             </div>
 
             <div className="flex items-center gap-5">
-              <Bell size={18} className="text-slate-500" />
-              <div className="h-7 w-px bg-slate-200" />
+              <Bell size={18} className="text-teal-600" />
+              <div className="h-7 w-px bg-teal-100" />
               <div className="flex items-center gap-3">
-                <span className="grid h-9 w-9 place-items-center bg-amber-200 text-xs font-bold text-amber-900">
+                <span className="grid h-9 w-9 place-items-center bg-emerald-100 text-xs font-bold text-emerald-700">
                   CDG
                 </span>
                 <span className="text-sm font-semibold text-slate-800">Chicco Di Grano</span>

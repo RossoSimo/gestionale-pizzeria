@@ -10,6 +10,10 @@ export function createOrder(payload) {
   return callBridge("createOrder", payload);
 }
 
+export function updateOrder(payload) {
+  return callBridge("updateOrder", payload);
+}
+
 // Applies a workflow status transition to an existing order.
 export function updateOrderStatus(payload) {
   return callBridge("updateOrderStatus", payload);

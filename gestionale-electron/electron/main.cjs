@@ -3,14 +3,17 @@ const path = require("node:path");
 const channels = require("./ipc/channels.cjs");
 const { registerAppHandlers } = require("./ipc/handlers/app.handlers.cjs");
 const { registerOrderHandlers } = require("./ipc/handlers/order.handlers.cjs");
+const { registerCustomerHandlers } = require("./ipc/handlers/customer.handlers.cjs");
 const { registerProductHandlers } = require("./ipc/handlers/product.handlers.cjs");
 const { registerIngredientHandlers } = require("./ipc/handlers/ingredient.handlers.cjs");
 const { registerAppSettingsHandlers } = require("./ipc/handlers/app-settings.handlers.cjs");
 const { createOrderRepository } = require("./db/repositories/order.repository.cjs");
+const { createCustomerRepository } = require("./db/repositories/customer.repository.cjs");
 const { createProductRepository } = require("./db/repositories/product.repository.cjs");
 const { createIngredientRepository } = require("./db/repositories/ingredient.repository.cjs");
 const { createAppSettingsRepository } = require("./db/repositories/app-settings.repository.cjs");
 const { createOrderService } = require("./services/order.service.cjs");
+const { createCustomerService } = require("./services/customer.service.cjs");
 const { createProductService } = require("./services/product.service.cjs");
 const { createIngredientService } = require("./services/ingredient.service.cjs");
 const { createAppSettingsService } = require("./services/app-settings.service.cjs");
@@ -45,16 +48,19 @@ function createMainWindow() {
 app.whenReady().then(() => {
   const dbClient = getDbClient();
   const orderRepository = createOrderRepository(dbClient);
+  const customerRepository = createCustomerRepository(dbClient);
   const productRepository = createProductRepository(dbClient);
   const ingredientRepository = createIngredientRepository(dbClient);
   const appSettingsRepository = createAppSettingsRepository(dbClient);
   const orderService = createOrderService(orderRepository);
+  const customerService = createCustomerService(customerRepository);
   const productService = createProductService(productRepository);
   const ingredientService = createIngredientService(ingredientRepository);
   const appSettingsService = createAppSettingsService(appSettingsRepository);
 
   registerAppHandlers(ipcMain, channels, app);
   registerOrderHandlers(ipcMain, channels, orderService);
+  registerCustomerHandlers(ipcMain, channels, customerService);
   registerProductHandlers(ipcMain, channels, productService);
   registerIngredientHandlers(ipcMain, channels, ingredientService);
   registerAppSettingsHandlers(ipcMain, channels, appSettingsService);

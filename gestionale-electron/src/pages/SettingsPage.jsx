@@ -212,16 +212,16 @@ export default function SettingsPage() {
         </p>
       </header>
 
-      <section className="border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="ui-surface p-4">
         <form className="space-y-4" onSubmit={handleSubmit}>
-          <section className="space-y-2 border border-slate-200 bg-slate-50 p-3">
+          <section className="ui-surface-soft space-y-2 p-3">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Categorie prodotto
             </h3>
 
             <div className="grid gap-2 md:grid-cols-2">
               {effectiveFormState.categories.map((categoryRow, index) => (
-                <div key={`${categoryRow.originalKey ?? "new"}-${index}`} className="grid gap-2 border border-slate-200 bg-white p-2 md:grid-cols-[1fr_1fr_auto]">
+                <div key={`${categoryRow.originalKey ?? "new"}-${index}`} className="ui-surface grid gap-2 p-2 md:grid-cols-[1fr_1fr_auto]">
                   <label className="grid gap-1 text-sm text-slate-700">
                     Codice
                     <input
@@ -248,7 +248,7 @@ export default function SettingsPage() {
                       <button
                         type="button"
                         onClick={() => removeCategoryRow(index)}
-                        className="bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700"
+                        className="ui-btn ui-btn-danger text-xs"
                         disabled={loading || submitting}
                       >
                         Rimuovi
@@ -263,7 +263,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={addCategoryRow}
-                className="bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700"
+                className="ui-btn ui-btn-accent text-xs"
                 disabled={loading || submitting}
               >
                 Aggiungi categoria
@@ -345,7 +345,7 @@ export default function SettingsPage() {
             <button
               type="submit"
               disabled={submitting || loading}
-              className="bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              className="ui-btn ui-btn-success text-sm"
             >
               {submitting ? "Salvataggio..." : "Salva orari"}
             </button>

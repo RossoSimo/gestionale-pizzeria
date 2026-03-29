@@ -7,6 +7,7 @@ const VALID_ORDER_STATUS = new Set([
   "CONSEGNATO",
   "ANNULLATO",
 ]);
+const EDITABLE_ORDER_STATUS = new Set(["IN_ATTESA", "CONFERMATO", "IN_PREPARAZIONE", "PRONTO"]);
 
 const ALLOWED_STATUS_TRANSITIONS = {
   IN_ATTESA: ["CONFERMATO", "IN_PREPARAZIONE", "ANNULLATO"],
@@ -142,6 +143,23 @@ function validateCreateOrderInput(input) {
   };
 }
 
+function validateUpdateOrderInput(input) {
+  ensureString(input?.orderId, "orderId");
+
+  const validatedInput = validateCreateOrderInput(input);
+
+  return {
+    orderId: input.orderId,
+    type: validatedInput.type,
+    customerId: validatedInput.customerId ?? null,
+    businessDate: validatedInput.businessDate,
+    expectedAt: validatedInput.expectedAt,
+    notes: validatedInput.notes,
+    totalAmountCents: validatedInput.totalAmountCents,
+    items: validatedInput.items,
+  };
+}
+
 /**
  * Validates a status transition according to the local workflow state machine.
  */
@@ -172,6 +190,26 @@ function createOrderService(orderRepository) {
       // Business validation is centralized here before touching persistence layer.
       const validatedInput = validateCreateOrderInput(input);
       return orderRepository.create(validatedInput);
+    },
+
+    async updateOrder(input) {
+      const validatedInput = validateUpdateOrderInput(input);
+      const order = await orderRepository.getById(validatedInput.orderId);
+
+      if (!order) {
+        const error = new Error("Ordine non trovato");
+        error.code = "ORDER_NOT_FOUND";
+        throw error;
+      }
+
+      if (!EDITABLE_ORDER_STATUS.has(order.status)) {
+        const error = new Error("Ordine non modificabile nello stato corrente");
+        error.code = "ORDER_NOT_EDITABLE";
+        error.details = { currentStatus: order.status };
+        throw error;
+      }
+
+      return orderRepository.update(validatedInput.orderId, validatedInput);
     },
 
     async updateOrderStatus(input) {

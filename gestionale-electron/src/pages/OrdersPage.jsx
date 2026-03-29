@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Clock3, Pencil, Search, Trash2, UserPlus } from "lucide-react";
+import { useCustomers } from "../features/customers/hooks/useCustomers";
 import { useIngredients } from "../features/ingredients/hooks/useIngredients";
 import { useOrders } from "../features/orders/hooks/useOrders";
 import { useProducts } from "../features/products/hooks/useProducts";
 import { useAppSettings } from "../features/settings/hooks/useAppSettings";
 import { buildExpectedAtIso, buildTimeSlotsForDate, getTodayDateInputValue } from "../lib/order-slots";
 import { centsToEuro } from "../lib/money";
-import { createOrder, updateOrderStatus } from "../services/ipc/orders.ipc";
+import { createCustomer, deleteCustomer, updateCustomer } from "../services/ipc/customers.ipc";
+import { createOrder, updateOrder, updateOrderStatus } from "../services/ipc/orders.ipc";
 
 const NEXT_STATUS_OPTIONS = {
   IN_ATTESA: ["CONFERMATO", "IN_PREPARAZIONE", "ANNULLATO"],
@@ -17,7 +19,26 @@ const NEXT_STATUS_OPTIONS = {
   ANNULLATO: [],
 };
 
+const STATUS_LABELS = {
+  IN_ATTESA: "In attesa",
+  CONFERMATO: "Confermato",
+  IN_PREPARAZIONE: "In preparazione",
+  PRONTO: "Pronto",
+  CONSEGNATO: "Consegnato",
+  ANNULLATO: "Annullato",
+};
+
+const STATUS_BADGE_CLASS = {
+  IN_ATTESA: "border border-amber-200 bg-amber-50 text-amber-800",
+  CONFERMATO: "border border-sky-200 bg-sky-50 text-sky-800",
+  IN_PREPARAZIONE: "border border-indigo-200 bg-indigo-50 text-indigo-800",
+  PRONTO: "border border-emerald-200 bg-emerald-50 text-emerald-800",
+  CONSEGNATO: "border border-teal-200 bg-teal-50 text-teal-800",
+  ANNULLATO: "border border-rose-200 bg-rose-50 text-rose-800",
+};
+
 const BASE_CATEGORY_ORDER = ["PIZZA", "BEVANDA", "ALTRO"];
+const ACTIVE_ORDER_STATUSES = new Set(["IN_ATTESA", "CONFERMATO", "IN_PREPARAZIONE", "PRONTO"]);
 
 function buildDefaultFormState(businessDate, availableTimeSlots) {
   return {
@@ -48,20 +69,64 @@ function normalizeSearchText(value) {
   return String(value ?? "").trim().toLowerCase();
 }
 
-function buildKnownCustomers(orders) {
+function buildKnownCustomers(customers) {
   const byId = new Map();
 
-  for (const order of orders) {
-    if (!order?.customer?.id || !order?.customer?.name) {
+  for (const customer of customers ?? []) {
+    if (!customer?.id || !customer?.name) {
       continue;
     }
 
-    if (!byId.has(order.customer.id)) {
-      byId.set(order.customer.id, order.customer);
+    if (!byId.has(customer.id)) {
+      byId.set(customer.id, customer);
     }
   }
 
   return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function buildCustomerFormState() {
+  return {
+    id: "",
+    name: "",
+    phone: "",
+    address: "",
+    notes: "",
+    isTemporary: false,
+  };
+}
+
+function formatCustomerSearchLabel(customer) {
+  const parts = [customer?.name ?? ""];
+
+  if (customer?.address) {
+    parts.push(customer.address);
+  }
+
+  if (customer?.phone) {
+    parts.push(customer.phone);
+  }
+
+  if (customer?.isTemporary) {
+    parts.push("temporaneo oggi");
+  }
+
+  return parts.filter(Boolean).join(" - ");
+}
+
+function isValidPhoneNumber(value) {
+  const normalized = String(value ?? "").trim();
+
+  if (!normalized) {
+    return true;
+  }
+
+  if (!/^\+?[0-9\s()\-]{6,20}$/.test(normalized)) {
+    return false;
+  }
+
+  const digitsOnly = normalized.replace(/\D/g, "");
+  return digitsOnly.length >= 6 && digitsOnly.length <= 15;
 }
 
 function getBaseIngredientsFromProduct(product) {
@@ -168,6 +233,50 @@ function formatDateTimeLabel(value) {
   });
 }
 
+function getStatusLabel(status) {
+  return STATUS_LABELS[status] ?? status;
+}
+
+function getStatusBadgeClass(status) {
+  return STATUS_BADGE_CLASS[status] ?? "border border-slate-200 bg-slate-50 text-slate-700";
+}
+
+function getPrimaryNextStatus(currentStatus) {
+  const nextStatuses = NEXT_STATUS_OPTIONS[currentStatus] ?? [];
+  return nextStatuses.find((status) => status !== "ANNULLATO") ?? null;
+}
+
+function formatDateInputFromIso(value) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatTimeSlotFromIso(value) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
 function buildCustomizationState() {
   return {
     isOpen: false,
@@ -211,6 +320,7 @@ function Modal({ title, onClose, children }) {
 export default function OrdersPage() {
   const todayDate = useMemo(() => getTodayDateInputValue(), []);
   const { orders, loading, error, reload } = useOrders();
+  const { customers, reload: reloadCustomers } = useCustomers();
   const { products, loading: productsLoading } = useProducts();
   const { ingredients } = useIngredients();
   const { settings: appSettings } = useAppSettings();
@@ -223,6 +333,16 @@ export default function OrdersPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [cartItems, setCartItems] = useState([]);
   const [customization, setCustomization] = useState(buildCustomizationState());
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [customerModalMode, setCustomerModalMode] = useState("create");
+  const [customerSubmitting, setCustomerSubmitting] = useState(false);
+  const [isCustomerDeleteConfirmOpen, setIsCustomerDeleteConfirmOpen] = useState(false);
+  const [customerForm, setCustomerForm] = useState(buildCustomerFormState());
+  const [customerSearchQuery, setCustomerSearchQuery] = useState("");
+  const [isCustomerSearchOpen, setIsCustomerSearchOpen] = useState(false);
+  const [editingOrderId, setEditingOrderId] = useState("");
+  const [statusUpdatingOrderId, setStatusUpdatingOrderId] = useState("");
+  const [statusChangeRequest, setStatusChangeRequest] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
   const categoryLabels = appSettings?.categoryLabels;
@@ -267,7 +387,7 @@ export default function OrdersPage() {
     });
   }, [availableTimeSlots, todayDate]);
 
-  const knownCustomers = useMemo(() => buildKnownCustomers(orders), [orders]);
+  const knownCustomers = useMemo(() => buildKnownCustomers(customers), [customers]);
 
   const visibleProducts = useMemo(() => {
     const searchText = normalizeSearchText(searchQuery);
@@ -329,6 +449,68 @@ export default function OrdersPage() {
   const selectedCustomer = useMemo(() => {
     return knownCustomers.find((customer) => customer.id === formData.customerId) ?? null;
   }, [formData.customerId, knownCustomers]);
+
+  const customersWithActiveOrders = useMemo(() => {
+    const ids = new Set();
+
+    for (const order of orders) {
+      if (!order?.customer?.id) {
+        continue;
+      }
+
+      if (ACTIVE_ORDER_STATUSES.has(order.status)) {
+        ids.add(order.customer.id);
+      }
+    }
+
+    return ids;
+  }, [orders]);
+
+  const filteredCustomers = useMemo(() => {
+    const normalizedSearch = normalizeSearchText(customerSearchQuery);
+
+    if (!normalizedSearch) {
+      return knownCustomers;
+    }
+
+    return knownCustomers.filter((customer) => {
+      const haystack = [customer.name, customer.address, customer.phone]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(normalizedSearch);
+    });
+  }, [customerSearchQuery, knownCustomers]);
+
+  const productById = useMemo(() => {
+    return new Map(products.map((product) => [product.id, product]));
+  }, [products]);
+
+  const ingredientById = useMemo(() => {
+    return new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
+  }, [ingredients]);
+
+  const editingOrder = useMemo(() => {
+    return orders.find((order) => order.id === editingOrderId) ?? null;
+  }, [editingOrderId, orders]);
+
+  const cancelStatusOrder = useMemo(() => {
+    if (statusChangeRequest?.nextStatus !== "ANNULLATO") {
+      return null;
+    }
+
+    return orders.find((order) => order.id === statusChangeRequest.orderId) ?? null;
+  }, [orders, statusChangeRequest]);
+
+  useEffect(() => {
+    if (!selectedCustomer) {
+      setCustomerSearchQuery("");
+      return;
+    }
+
+    setCustomerSearchQuery(formatCustomerSearchLabel(selectedCustomer));
+  }, [selectedCustomer]);
 
   const canCustomizeIngredients = isPizzaCategory(customization.productCategory);
 
@@ -598,7 +780,62 @@ export default function OrdersPage() {
     );
   }
 
-  async function handleCreateOrder(event) {
+  function resetOrderComposer() {
+    setEditingOrderId("");
+    setFormData(buildDefaultFormState(todayDate, availableTimeSlots));
+    setCartItems([]);
+  }
+
+  function buildCartItemsFromOrder(order) {
+    return (order.items ?? []).map((item) => {
+      const product = productById.get(item.productId);
+
+      return {
+        lineItemId: buildLineItemId(),
+        productId: item.productId,
+        productName: product?.name ?? "Prodotto",
+        productCategory: product?.category ?? "ALTRO",
+        quantity: item.quantity,
+        unitPriceCents: item.unitPriceCents,
+        notes: item.notes ?? "",
+        baseIngredients: cloneBaseIngredients(getBaseIngredientsFromProduct(product)),
+        modifiers: (item.modifiers ?? []).map((modifier) => ({
+          ingredientId: modifier.ingredientId,
+          ingredientName: ingredientById.get(modifier.ingredientId)?.name ?? "Ingrediente",
+          action: modifier.action,
+          priceAppliedCents: modifier.priceAppliedCents,
+        })),
+      };
+    });
+  }
+
+  function startEditingOrder(order) {
+    if (!ACTIVE_ORDER_STATUSES.has(order.status)) {
+      setActionError(new Error("Puoi modificare solo ordini attivi."));
+      return;
+    }
+
+    const businessDate = formatDateInputFromIso(order.businessDate);
+    const expectedTimeSlot = formatTimeSlotFromIso(order.expectedAt);
+
+    setActionError(null);
+    setEditingOrderId(order.id);
+    setFormData({
+      type: order.type,
+      customerId: order.customerId ?? "",
+      businessDate: businessDate || todayDate,
+      expectedTimeSlot,
+      notes: order.notes ?? "",
+    });
+    setCartItems(buildCartItemsFromOrder(order));
+  }
+
+  function cancelEditingOrder() {
+    setActionError(null);
+    resetOrderComposer();
+  }
+
+  async function handleSubmitOrder(event) {
     event.preventDefault();
 
     if (cartItems.length === 0) {
@@ -627,7 +864,7 @@ export default function OrdersPage() {
     setActionError(null);
 
     try {
-      await createOrder({
+      const payload = {
         type: formData.type,
         customerId: formData.customerId || null,
         businessDate: formData.businessDate,
@@ -645,10 +882,18 @@ export default function OrdersPage() {
             priceAppliedCents: modifier.priceAppliedCents,
           })),
         })),
-      });
+      };
 
-      setFormData(buildDefaultFormState(todayDate, availableTimeSlots));
-      setCartItems([]);
+      if (editingOrderId) {
+        await updateOrder({
+          orderId: editingOrderId,
+          ...payload,
+        });
+      } else {
+        await createOrder(payload);
+      }
+
+      resetOrderComposer();
       await reload();
     } catch (err) {
       setActionError(err);
@@ -657,42 +902,251 @@ export default function OrdersPage() {
     }
   }
 
-  async function handleStatusChange(orderId, nextStatus) {
-    // Persist status transition first, then refresh list from local DB source of truth.
+  async function executeStatusChange(orderId, nextStatus) {
     setActionError(null);
+    setStatusUpdatingOrderId(orderId);
 
     try {
       await updateOrderStatus({ orderId, nextStatus });
       await reload();
     } catch (err) {
       setActionError(err);
+    } finally {
+      setStatusUpdatingOrderId("");
     }
+  }
+
+  async function handleStatusChange(orderId, nextStatus) {
+    // Persist status transition first, then refresh list from local DB source of truth.
+    if (nextStatus === "ANNULLATO") {
+      setStatusChangeRequest({ orderId, nextStatus });
+      return;
+    }
+
+    await executeStatusChange(orderId, nextStatus);
+  }
+
+  function closeStatusChangeModal() {
+    setStatusChangeRequest(null);
+  }
+
+  async function confirmCancelStatusChange() {
+    if (!statusChangeRequest) {
+      return;
+    }
+
+    const request = statusChangeRequest;
+    setStatusChangeRequest(null);
+    await executeStatusChange(request.orderId, request.nextStatus);
+  }
+
+  function openCreateCustomerModal() {
+    setActionError(null);
+    setIsCustomerSearchOpen(false);
+    setCustomerModalMode("create");
+    setIsCustomerDeleteConfirmOpen(false);
+    setCustomerForm(buildCustomerFormState());
+    setIsCustomerModalOpen(true);
+  }
+
+  function openEditCustomerModal() {
+    if (!selectedCustomer) {
+      return;
+    }
+
+    setActionError(null);
+    setIsCustomerSearchOpen(false);
+    setCustomerModalMode("edit");
+    setIsCustomerDeleteConfirmOpen(false);
+    setCustomerForm({
+      id: selectedCustomer.id,
+      name: selectedCustomer.name ?? "",
+      phone: selectedCustomer.phone ?? "",
+      address: selectedCustomer.address ?? "",
+      notes: selectedCustomer.notes ?? "",
+      isTemporary: Boolean(selectedCustomer.isTemporary),
+    });
+    setIsCustomerModalOpen(true);
+  }
+
+  async function handleCreateCustomer(event) {
+    event.preventDefault();
+
+    if (!isValidPhoneNumber(customerForm.phone)) {
+      setActionError(new Error("Numero di telefono non valido."));
+      return;
+    }
+
+    setCustomerSubmitting(true);
+    setActionError(null);
+
+    try {
+      const payload = {
+        name: customerForm.name,
+        phone: customerForm.phone,
+        address: customerForm.address,
+        notes: customerForm.notes,
+        isTemporary: customerForm.isTemporary,
+      };
+
+      const savedCustomer = customerModalMode === "edit"
+        ? await updateCustomer({ id: customerForm.id, ...payload })
+        : await createCustomer(payload);
+
+      setFormData((prev) => ({
+        ...prev,
+        customerId: savedCustomer.id,
+      }));
+
+      setIsCustomerDeleteConfirmOpen(false);
+      setCustomerForm(buildCustomerFormState());
+      setIsCustomerModalOpen(false);
+      await reloadCustomers();
+    } catch (err) {
+      setActionError(err);
+    } finally {
+      setCustomerSubmitting(false);
+    }
+  }
+
+  function openCustomerDeleteConfirm() {
+    if (customerModalMode !== "edit" || !customerForm.id) {
+      return;
+    }
+
+    setIsCustomerDeleteConfirmOpen(true);
+  }
+
+  function closeCustomerDeleteConfirm() {
+    setIsCustomerDeleteConfirmOpen(false);
+  }
+
+  async function handleDeleteCustomerFromModal() {
+    if (customerModalMode !== "edit" || !customerForm.id) {
+      return;
+    }
+
+    setActionError(null);
+    setCustomerSubmitting(true);
+
+    try {
+      await deleteCustomer({ id: customerForm.id });
+      setFormData((prev) => ({
+        ...prev,
+        customerId: "",
+      }));
+      setCustomerSearchQuery("");
+      setIsCustomerSearchOpen(false);
+      setIsCustomerDeleteConfirmOpen(false);
+      setCustomerForm(buildCustomerFormState());
+      setIsCustomerModalOpen(false);
+      await reloadCustomers();
+    } catch (err) {
+      setActionError(err);
+    } finally {
+      setCustomerSubmitting(false);
+    }
+  }
+
+  function handleSelectCustomer(customerId) {
+    setFormData((prev) => ({
+      ...prev,
+      customerId,
+    }));
+    setIsCustomerSearchOpen(false);
   }
 
   return (
     <div className="space-y-5">
       {/* Blocco principale: composizione nuovo ordine (catalogo + carrello) */}
-      <section className="bg-white p-4 shadow-sm">
-        <form className="grid gap-4 xl:grid-cols-[1fr_360px]" onSubmit={handleCreateOrder}>
+      <section className="ui-surface p-4">
+        <form className="grid gap-4 xl:grid-cols-[1fr_360px]" onSubmit={handleSubmitOrder}>
           {/* Colonna sinistra: filtri e catalogo prodotti */}
           <div className="space-y-4">
             {/* Riga filtri ordine: cliente, tipo, data, orario, ricerca */}
             <section className="grid gap-3 border-b border-slate-200 pb-4 md:grid-cols-2 xl:grid-cols-5">
-              <label className="grid gap-1 text-sm text-slate-600">
-                Cliente
-                <select
-                  value={formData.customerId}
-                  onChange={(event) => setFormData((prev) => ({ ...prev, customerId: event.target.value }))}
-                  className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
+              <div className="relative grid gap-1 text-sm text-slate-600">
+                <span>Cliente</span>
+                <div className="relative">
+                  <Search size={14} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={customerSearchQuery}
+                    onFocus={() => setIsCustomerSearchOpen(true)}
+                    onChange={(event) => {
+                      setCustomerSearchQuery(event.target.value);
+                      setIsCustomerSearchOpen(true);
+                    }}
+                    placeholder="Cerca cliente, via o telefono..."
+                    className="w-full border border-slate-200 bg-slate-50 py-2 pl-7 pr-2 text-sm"
+                  />
+                  {isCustomerSearchOpen && (
+                    <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto border border-slate-200 bg-white shadow-lg">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleSelectCustomer("");
+                          setCustomerSearchQuery("");
+                        }}
+                        className="block w-full border-b border-slate-100 px-2 py-2 text-left text-sm text-slate-700 hover:bg-teal-50"
+                      >
+                        Cliente al banco
+                      </button>
+
+                      {filteredCustomers.map((customer) => (
+                        <button
+                          key={customer.id}
+                          type="button"
+                          onClick={() => {
+                            handleSelectCustomer(customer.id);
+                            setCustomerSearchQuery(formatCustomerSearchLabel(customer));
+                          }}
+                          className="block w-full border-b border-slate-100 px-2 py-2 text-left hover:bg-teal-50"
+                        >
+                          <span className="flex items-center gap-1 text-sm font-semibold text-slate-900">
+                            {customersWithActiveOrders.has(customer.id) && (
+                              <Clock3 size={13} className="text-amber-600" />
+                            )}
+                            <span>
+                              {customer.name}
+                              {customer.isTemporary ? " (temporaneo oggi)" : ""}
+                            </span>
+                          </span>
+                          {customer.address && (
+                            <span className="block text-xs text-slate-600">{customer.address}</span>
+                          )}
+                          {customer.phone && (
+                            <span className="block text-xs text-slate-500">{customer.phone}</span>
+                          )}
+                        </button>
+                      ))}
+
+                      {filteredCustomers.length === 0 && (
+                        <p className="px-2 py-2 text-sm text-slate-500">Nessun cliente trovato</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={openCreateCustomerModal}
+                  className="ui-btn ui-btn-success inline-flex w-fit items-center gap-1 px-2 py-1 text-xs"
                 >
-                  <option value="">Cliente al banco</option>
-                  {knownCustomers.map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <UserPlus size={13} />
+                  Nuovo cliente
+                </button>
+
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    type="button"
+                    onClick={openEditCustomerModal}
+                    disabled={!selectedCustomer}
+                    className="ui-btn ui-btn-accent inline-flex w-fit items-center gap-1 px-2 py-1 text-xs"
+                  >
+                    <Pencil size={13} />
+                    Modifica
+                  </button>
+                </div>
+              </div>
 
               <label className="grid gap-1 text-sm text-slate-600">
                 Tipo ordine
@@ -761,8 +1215,8 @@ export default function OrdersPage() {
                       onClick={() => setSelectedCategory(category)}
                       className={
                         isActive
-                          ? "border border-slate-900 bg-slate-900 px-3 py-1 text-xs font-semibold tracking-wide text-white"
-                          : "border border-slate-300 bg-white px-3 py-1 text-xs font-semibold tracking-wide text-slate-600 hover:bg-slate-100"
+                          ? "border border-teal-700 bg-teal-700 px-3 py-1 text-xs font-semibold tracking-wide text-white"
+                          : "border border-slate-300 bg-white px-3 py-1 text-xs font-semibold tracking-wide text-slate-600 hover:bg-teal-50"
                       }
                     >
                       {getCategoryLabel(category, categoryLabels)}
@@ -844,7 +1298,9 @@ export default function OrdersPage() {
             <div className="mb-3 border-b border-slate-200 pb-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Nuovo ordine</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {editingOrder ? `Modifica ordine #${editingOrder.dailyNumber}` : "Nuovo ordine"}
+                  </p>
                   <p className="text-sm font-semibold text-slate-900">
                     {selectedCustomer ? selectedCustomer.name : "Cliente al banco"}
                   </p>
@@ -965,10 +1421,20 @@ export default function OrdersPage() {
               <button
                 type="submit"
                 disabled={submitting || cartItems.length === 0}
-                className="w-full bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                className="ui-btn ui-btn-success w-full px-3 py-2 text-sm"
               >
-                {submitting ? "Salvataggio..." : "Conferma ordine"}
+                {submitting ? "Salvataggio..." : editingOrderId ? "Salva modifiche ordine" : "Conferma ordine"}
               </button>
+
+              {editingOrderId && (
+                <button
+                  type="button"
+                  onClick={cancelEditingOrder}
+                  className="mt-2 w-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                >
+                  Annulla modifica
+                </button>
+              )}
             </div>
           </aside>
         </form>
@@ -1121,9 +1587,187 @@ export default function OrdersPage() {
               <button
                 type="button"
                 onClick={applyCustomization}
-                className="bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
+                className="ui-btn ui-btn-success px-3 py-2 text-sm"
               >
                 {customization.mode === "add" ? "Aggiungi al carrello" : "Salva modifiche"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {isCustomerModalOpen && (
+        <Modal
+          title={customerModalMode === "edit" ? "Modifica cliente" : "Nuovo cliente"}
+          onClose={() => {
+            setIsCustomerDeleteConfirmOpen(false);
+            setIsCustomerModalOpen(false);
+          }}
+        >
+          <form className="grid gap-3" onSubmit={handleCreateCustomer}>
+            <label className="grid gap-1 text-sm text-slate-600">
+              Nome
+              <input
+                required
+                value={customerForm.name}
+                onChange={(event) =>
+                  setCustomerForm((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }))
+                }
+                className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
+              />
+            </label>
+
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={customerForm.isTemporary}
+                onChange={(event) =>
+                  setCustomerForm((prev) => ({
+                    ...prev,
+                    isTemporary: event.target.checked,
+                  }))
+                }
+              />
+              Cliente temporaneo (salvato solo per la giornata corrente)
+            </label>
+
+            <label className="grid gap-1 text-sm text-slate-600">
+              Telefono
+              <input
+                value={customerForm.phone}
+                onChange={(event) =>
+                  setCustomerForm((prev) => ({
+                    ...prev,
+                    phone: event.target.value,
+                  }))
+                }
+                className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
+              />
+              {customerForm.phone.trim() && !isValidPhoneNumber(customerForm.phone) && (
+                <span className="text-xs text-rose-600">Numero di telefono non valido</span>
+              )}
+            </label>
+
+            <label className="grid gap-1 text-sm text-slate-600">
+              Indirizzo
+              <input
+                value={customerForm.address}
+                onChange={(event) =>
+                  setCustomerForm((prev) => ({
+                    ...prev,
+                    address: event.target.value,
+                  }))
+                }
+                className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
+              />
+            </label>
+
+            <label className="grid gap-1 text-sm text-slate-600">
+              Note
+              <textarea
+                value={customerForm.notes}
+                onChange={(event) =>
+                  setCustomerForm((prev) => ({
+                    ...prev,
+                    notes: event.target.value,
+                  }))
+                }
+                rows={3}
+                className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2">
+              {customerModalMode === "edit" && (
+                <button
+                  type="button"
+                  onClick={openCustomerDeleteConfirm}
+                  disabled={customerSubmitting}
+                  className="ui-btn ui-btn-danger mr-auto px-3 py-2 text-sm"
+                >
+                  Elimina cliente
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCustomerDeleteConfirmOpen(false);
+                  setIsCustomerModalOpen(false);
+                }}
+                className="border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+              >
+                Annulla
+              </button>
+              <button
+                type="submit"
+                disabled={customerSubmitting || !isValidPhoneNumber(customerForm.phone)}
+                className="ui-btn ui-btn-success px-3 py-2 text-sm"
+              >
+                {customerSubmitting
+                  ? "Salvataggio..."
+                  : customerModalMode === "edit"
+                    ? "Salva cliente"
+                    : "Crea cliente"}
+              </button>
+            </div>
+          </form>
+
+          {isCustomerDeleteConfirmOpen && customerModalMode === "edit" && (
+            <div className="mt-3 border border-rose-200 bg-rose-50 p-3">
+              <p className="text-sm text-rose-800">
+                Confermi eliminazione cliente {customerForm.name || "selezionato"}?
+              </p>
+              <div className="mt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeCustomerDeleteConfirm}
+                  disabled={customerSubmitting}
+                  className="border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                >
+                  Torna indietro
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteCustomerFromModal}
+                  disabled={customerSubmitting}
+                  className="ui-btn ui-btn-danger px-3 py-2 text-sm"
+                >
+                  {customerSubmitting ? "Eliminazione..." : "Conferma eliminazione"}
+                </button>
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {statusChangeRequest?.nextStatus === "ANNULLATO" && (
+        <Modal
+          title="Conferma annullamento ordine"
+          onClose={closeStatusChangeModal}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-slate-700">
+              Confermi l&apos;annullamento dell&apos;ordine {cancelStatusOrder ? `#${cancelStatusOrder.dailyNumber}` : "selezionato"}?
+            </p>
+
+            <div className="flex justify-end gap-2 border-t border-slate-200 pt-3">
+              <button
+                type="button"
+                onClick={closeStatusChangeModal}
+                className="border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+              >
+                Torna indietro
+              </button>
+              <button
+                type="button"
+                onClick={confirmCancelStatusChange}
+                className="ui-btn ui-btn-danger px-3 py-2 text-sm"
+              >
+                Conferma annullamento
               </button>
             </div>
           </div>
@@ -1155,20 +1799,55 @@ export default function OrdersPage() {
                     #{order.dailyNumber} - {order.type}
                   </p>
                   <p className="text-xs text-slate-500">Cliente: {order.customer?.name ?? "Banco"}</p>
-                  <p className="text-xs text-slate-500">Stato: {order.status}</p>
+                  <p className="mt-1">
+                    <span className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold ${getStatusBadgeClass(order.status)}`}>
+                      {getStatusLabel(order.status)}
+                    </span>
+                  </p>
                   <p className="text-xs text-slate-500">Ritiro/Consegna: {formatDateTimeLabel(order.expectedAt)}</p>
                 </div>
 
                 {/* Colonna azioni transizione stato */}
-                <div className="flex gap-2">
-                  {(NEXT_STATUS_OPTIONS[order.status] ?? []).map((nextStatus) => (
+                <div className="flex flex-wrap items-center gap-2">
+                  {ACTIVE_ORDER_STATUSES.has(order.status) && (
+                    <button
+                      type="button"
+                      onClick={() => startEditingOrder(order)}
+                      className="ui-btn ui-btn-accent px-2 py-1 text-xs"
+                      disabled={statusUpdatingOrderId === order.id}
+                    >
+                      Modifica
+                    </button>
+                  )}
+
+                  {getPrimaryNextStatus(order.status) && (
+                    <button
+                      type="button"
+                      onClick={() => handleStatusChange(order.id, getPrimaryNextStatus(order.status))}
+                      disabled={statusUpdatingOrderId === order.id}
+                      className="ui-btn ui-btn-success px-2 py-1 text-xs"
+                    >
+                      {statusUpdatingOrderId === order.id
+                        ? "Aggiornamento..."
+                        : `Avanza a ${getStatusLabel(getPrimaryNextStatus(order.status))}`}
+                    </button>
+                  )}
+
+                  {(NEXT_STATUS_OPTIONS[order.status] ?? [])
+                    .filter((nextStatus) => nextStatus !== getPrimaryNextStatus(order.status))
+                    .map((nextStatus) => (
                     <button
                       key={nextStatus}
                       type="button"
                       onClick={() => handleStatusChange(order.id, nextStatus)}
-                      className="bg-slate-100 px-2 py-1 text-xs text-slate-700"
+                      disabled={statusUpdatingOrderId === order.id}
+                      className={
+                        nextStatus === "ANNULLATO"
+                          ? "ui-btn ui-btn-danger px-2 py-1 text-xs"
+                          : "ui-btn ui-btn-neutral px-2 py-1 text-xs"
+                      }
                     >
-                      {nextStatus}
+                      {getStatusLabel(nextStatus)}
                     </button>
                   ))}
                 </div>

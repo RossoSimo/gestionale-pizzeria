@@ -2,11 +2,97 @@
 
 @layer base {
   :root {
-    color: #f5f7fa;
-    background: #121722;
+    color: #0f172a;
+    background: #f3f7f6;
+    --app-accent-50: #ecfeff;
+    --app-accent-100: #cffafe;
+    --app-accent-500: #14b8a6;
+    --app-accent-600: #0d9488;
+    --app-accent-700: #0f766e;
+    --app-success-500: #16a34a;
+    --app-success-600: #15803d;
+    --app-danger-500: #ef4444;
+    --app-danger-600: #dc2626;
+    --app-surface: #ffffff;
+    --app-surface-soft: #f8fafc;
+    --app-border: #dbe4ea;
   }
 
   body {
     margin: 0;
+    color: #0f172a;
+    background:
+      radial-gradient(circle at 8% 0%, #ccfbf1 0%, rgba(204, 251, 241, 0) 42%),
+      radial-gradient(circle at 100% 100%, #dbeafe 0%, rgba(219, 234, 254, 0) 34%),
+      #f3f7f6;
+  }
+}
+
+@layer components {
+  .ui-surface {
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    box-shadow: 0 10px 24px -20px rgba(15, 23, 42, 0.35);
+  }
+
+  .ui-surface-soft {
+    background: var(--app-surface-soft);
+    border: 1px solid var(--app-border);
+  }
+
+  .ui-btn {
+    border: 1px solid transparent;
+    padding: 0.5rem 0.8rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 160ms ease;
+  }
+
+  .ui-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .ui-btn-neutral {
+    color: #0f172a;
+    background: #ffffff;
+    border-color: #cbd5e1;
+  }
+
+  .ui-btn-neutral:hover:not(:disabled) {
+    background: #f1f5f9;
+  }
+
+  .ui-btn-accent {
+    color: #ffffff;
+    background: var(--app-accent-600);
+    border-color: var(--app-accent-600);
+  }
+
+  .ui-btn-accent:hover:not(:disabled) {
+    background: var(--app-accent-700);
+    border-color: var(--app-accent-700);
+  }
+
+  .ui-btn-success {
+    color: #ffffff;
+    background: var(--app-success-500);
+    border-color: var(--app-success-500);
+  }
+
+  .ui-btn-success:hover:not(:disabled) {
+    background: var(--app-success-600);
+    border-color: var(--app-success-600);
+  }
+
+  .ui-btn-danger {
+    color: #ffffff;
+    background: var(--app-danger-500);
+    border-color: var(--app-danger-500);
+  }
+
+  .ui-btn-danger:hover:not(:disabled) {
+    background: var(--app-danger-600);
+    border-color: var(--app-danger-600);
   }
 }

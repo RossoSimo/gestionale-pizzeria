@@ -56,6 +56,8 @@ model Customer {
   phone     String?
   address   String?
   notes     String?   // Es: "Citofono rotto", "Cane cattivo"
+  isTemporary Boolean  @default(false)
+  temporaryBusinessDate DateTime?
   
   orders    Order[]
 
@@ -70,6 +72,7 @@ model Customer {
   @@index([updatedAt])
   @@index([deletedAt])
   @@index([syncStatus])
+  @@index([isTemporary, temporaryBusinessDate])
 }
 
 model Product {

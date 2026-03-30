@@ -212,6 +212,20 @@ function createOrderService(orderRepository) {
       return orderRepository.update(validatedInput.orderId, validatedInput);
     },
 
+    async deleteOrder(input) {
+      ensureString(input?.orderId, "orderId");
+
+      const order = await orderRepository.getById(input.orderId);
+
+      if (!order) {
+        const error = new Error("Ordine non trovato");
+        error.code = "ORDER_NOT_FOUND";
+        throw error;
+      }
+
+      return orderRepository.softDelete(input.orderId);
+    },
+
     async updateOrderStatus(input) {
       // Service enforces transition rules before writing to repository.
       ensureString(input?.orderId, "orderId");

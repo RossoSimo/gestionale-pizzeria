@@ -8,7 +8,8 @@ const DEFAULT_APP_SETTINGS = {
   categoryPizzaLabel: "Pizze",
   categoryBevandaLabel: "Bevanda",
   categoryAltroLabel: "Altro",
-  extraCategoriesJson: "[]",
+  extraCategoriesJson:
+    '[{"key":"PIZZA_STAGIONALI","label":"Pizze stagionali"},{"key":"PIZZA_SPECIALI","label":"Pizze speciali"}]',
 };
 
 const BASE_CATEGORY_KEYS = ["PIZZA", "BEVANDA", "ALTRO"];

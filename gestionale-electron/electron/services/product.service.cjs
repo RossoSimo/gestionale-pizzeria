@@ -1,4 +1,6 @@
 function createProductService(productRepository) {
+  const PIZZA_FAMILY_CATEGORY_KEYS = new Set(["PIZZA", "PIZZA_STAGIONALI", "PIZZA_SPECIALI"]);
+
   /**
    * Creates standardized validation errors for product operations.
    */
@@ -61,7 +63,7 @@ function createProductService(productRepository) {
           : null,
       priceCents: payload.priceCents,
       category: payload.category.trim(),
-      ingredientIds: payload.category === "PIZZA" ? dedupedIngredientIds : [],
+      ingredientIds: PIZZA_FAMILY_CATEGORY_KEYS.has(payload.category.trim()) ? dedupedIngredientIds : [],
     };
   }
 

@@ -6,6 +6,7 @@
   "ORDERS_LIST": "orders:list",
   "ORDERS_CREATE": "orders:create",
   "ORDERS_UPDATE": "orders:update",
+  "ORDERS_DELETE": "orders:delete",
   "ORDERS_UPDATE_STATUS": "orders:updateStatus",
   "CUSTOMERS_LIST": "customers:list",
   "CUSTOMERS_CREATE": "customers:create",

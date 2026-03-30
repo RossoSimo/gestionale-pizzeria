@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { useAppSettings } from "../features/settings/hooks/useAppSettings";
 import { updateAppSettings } from "../services/ipc/app-settings.ipc";
 import { buildTimeSlotsFromDay, WEEKDAY_LABELS, WEEKDAY_ORDER } from "../lib/order-slots";
+import ToastNotifications, { useToastNotifications } from "../components/common/ToastNotifications";
 
 const SLOT_OPTIONS = [10, 15, 20, 30, 60];
-const BASE_CATEGORY_KEYS = ["PIZZA", "BEVANDA", "ALTRO"];
+const BASE_CATEGORY_KEYS = ["PIZZA", "PIZZA_STAGIONALI", "PIZZA_SPECIALI", "BEVANDA", "ALTRO"];
 
 function normalizeCategoryKey(value) {
   return String(value ?? "")
@@ -50,6 +51,8 @@ function buildFormState(settings) {
   return {
     categories: buildCategoryRows({
       PIZZA: settings.categoryLabels?.PIZZA ?? "Pizze",
+      PIZZA_STAGIONALI: settings.categoryLabels?.PIZZA_STAGIONALI ?? "Pizze stagionali",
+      PIZZA_SPECIALI: settings.categoryLabels?.PIZZA_SPECIALI ?? "Pizze speciali",
       BEVANDA: settings.categoryLabels?.BEVANDA ?? "Bevanda",
       ALTRO: settings.categoryLabels?.ALTRO ?? "Altro",
       ...settings.categoryLabels,
@@ -69,6 +72,7 @@ function buildFormState(settings) {
 }
 
 export default function SettingsPage() {
+  const { toasts, pushToast, dismissToast } = useToastNotifications();
   const { settings, loading, error, reload } = useAppSettings();
   const [formState, setFormState] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -175,6 +179,14 @@ export default function SettingsPage() {
         categoryLabels.PIZZA = "Pizze";
       }
 
+      if (!categoryLabels.PIZZA_STAGIONALI) {
+        categoryLabels.PIZZA_STAGIONALI = "Pizze stagionali";
+      }
+
+      if (!categoryLabels.PIZZA_SPECIALI) {
+        categoryLabels.PIZZA_SPECIALI = "Pizze speciali";
+      }
+
       if (!categoryLabels.BEVANDA) {
         categoryLabels.BEVANDA = "Bevanda";
       }
@@ -195,9 +207,10 @@ export default function SettingsPage() {
       });
 
       setFormState(null);
-      setActionMessage("Impostazioni salvate.");
+      pushToast({ type: "success", title: "Impostazioni salvate" });
       await reload();
     } catch (err) {
+      pushToast({ type: "error", title: "Errore", description: err.message });
       setActionError(err);
     } finally {
       setSubmitting(false);
@@ -206,6 +219,7 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-4">
+      <ToastNotifications toasts={toasts} onDismiss={dismissToast} />
       <header className="space-y-1 p-4">
         <p className="text-sm text-slate-600">
           Configura i giorni di apertura e gli slot orari per ciascun giorno della settimana.

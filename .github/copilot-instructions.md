@@ -34,11 +34,11 @@ Apply these guidelines for UI/layout tasks unless the user explicitly asks other
 1. Visual direction: modern light dashboard (clean, neutral, high readability).
 2. Layout shell: left sidebar + top header bar + main content area.
 3. Sidebar: include icons for navigation entries and support collapsed icon-only mode.
-4. Shape language: main containers (sidebar, topbar, page surface) should NOT be rounded.
-5. Borders: avoid heavy framed/windowed look; prefer subtle separators and light shadows.
-6. Palette: light backgrounds with slate/neutral text and restrained accent colors.
+4. Shape language: prefer soft and rounded shapes (e.g., `rounded-xl`, `rounded-2xl` for modals and cards, `rounded-lg` for inputs/buttons) to create a friendlier, organic interface.
+5. Borders & Styling: avoid heavy framed/windowed look; prefer very subtle separators, light shadows (e.g., `shadow-sm`, `ring-1 ring-slate-900/5`), soft backgrounds (`bg-slate-50`), and blur effects (`backdrop-blur-sm` for modals).
+6. Focus States & Accents: Use colored focus rings (e.g., `focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500`) to highlight interactive elements. Keep accent colors fresh and consistent.
 7. Responsiveness: preserve desktop-first dashboard layout and graceful mobile fallback.
-8. Consistency: reuse shared layout component and avoid duplicating shell structure per page.
+8. Consistency: maintain a unified design system using structured grids or card layouts rather than simple stacked lists where applicable, and incorporate fluid transitions (e.g., animations/`transition-colors`) on hover states.
 
 # Project Folder Conventions
 

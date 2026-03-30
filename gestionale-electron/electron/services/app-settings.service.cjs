@@ -47,6 +47,8 @@ const DEFAULT_DAY_SETTINGS = {
 
 const DEFAULT_CATEGORY_LABELS = {
   PIZZA: "Pizze",
+  PIZZA_STAGIONALI: "Pizze stagionali",
+  PIZZA_SPECIALI: "Pizze speciali",
   BEVANDA: "Bevanda",
   ALTRO: "Altro",
 };
@@ -142,6 +144,14 @@ function normalizeCategoryLabels(input) {
       typeof source.PIZZA === "string" && source.PIZZA.trim()
         ? source.PIZZA.trim()
         : DEFAULT_CATEGORY_LABELS.PIZZA,
+    PIZZA_STAGIONALI:
+      typeof source.PIZZA_STAGIONALI === "string" && source.PIZZA_STAGIONALI.trim()
+        ? source.PIZZA_STAGIONALI.trim()
+        : DEFAULT_CATEGORY_LABELS.PIZZA_STAGIONALI,
+    PIZZA_SPECIALI:
+      typeof source.PIZZA_SPECIALI === "string" && source.PIZZA_SPECIALI.trim()
+        ? source.PIZZA_SPECIALI.trim()
+        : DEFAULT_CATEGORY_LABELS.PIZZA_SPECIALI,
     BEVANDA:
       typeof source.BEVANDA === "string" && source.BEVANDA.trim()
         ? source.BEVANDA.trim()

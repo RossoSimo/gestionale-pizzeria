@@ -276,6 +276,64 @@ function createOrderRepository(db) {
         },
       });
     },
+
+    async softDelete(orderId) {
+      const now = new Date();
+
+      return db.$transaction(async (tx) => {
+        const existingOrder = await tx.order.findFirst({
+          where: {
+            id: orderId,
+            deletedAt: null,
+          },
+        });
+
+        if (!existingOrder) {
+          const error = new Error("Ordine non trovato");
+          error.code = "ORDER_NOT_FOUND";
+          throw error;
+        }
+
+        await tx.orderItemModifier.updateMany({
+          where: {
+            deletedAt: null,
+            orderItem: {
+              orderId,
+              deletedAt: null,
+            },
+          },
+          data: {
+            deletedAt: now,
+            syncStatus: "PENDING",
+          },
+        });
+
+        await tx.orderItem.updateMany({
+          where: {
+            orderId,
+            deletedAt: null,
+          },
+          data: {
+            deletedAt: now,
+            syncStatus: "PENDING",
+          },
+        });
+
+        return tx.order.update({
+          where: {
+            id: orderId,
+          },
+          data: {
+            status: "ANNULLATO",
+            deletedAt: now,
+            version: {
+              increment: 1,
+            },
+            syncStatus: "PENDING",
+          },
+        });
+      });
+    },
   };
 }
 

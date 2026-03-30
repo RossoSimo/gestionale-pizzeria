@@ -14,6 +14,10 @@ export function updateOrder(payload) {
   return callBridge("updateOrder", payload);
 }
 
+export function deleteOrder(payload) {
+  return callBridge("deleteOrder", payload);
+}
+
 // Applies a workflow status transition to an existing order.
 export function updateOrderStatus(payload) {
   return callBridge("updateOrderStatus", payload);

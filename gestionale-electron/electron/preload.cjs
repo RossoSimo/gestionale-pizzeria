@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   listOrders: (filters) => ipcRenderer.invoke(channels.ORDERS_LIST, filters),
   createOrder: (payload) => ipcRenderer.invoke(channels.ORDERS_CREATE, payload),
   updateOrder: (payload) => ipcRenderer.invoke(channels.ORDERS_UPDATE, payload),
+  deleteOrder: (payload) => ipcRenderer.invoke(channels.ORDERS_DELETE, payload),
   updateOrderStatus: (payload) => ipcRenderer.invoke(channels.ORDERS_UPDATE_STATUS, payload),
   listCustomers: (filters) => ipcRenderer.invoke(channels.CUSTOMERS_LIST, filters),
   createCustomer: (payload) => ipcRenderer.invoke(channels.CUSTOMERS_CREATE, payload),

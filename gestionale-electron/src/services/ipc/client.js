@@ -78,6 +78,9 @@ function createBrowserFallbackBridge() {
     updateOrder: async () => {
       throw createBridgeUnavailableError("updateOrder");
     },
+    deleteOrder: async () => {
+      throw createBridgeUnavailableError("deleteOrder");
+    },
     updateOrderStatus: async () => {
       throw createBridgeUnavailableError("updateOrderStatus");
     },

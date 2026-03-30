@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { Clock3, Pencil, Search, Trash2, UserPlus } from "lucide-react";
+import { Calendar, Clock3, Pencil, Search, Trash2, UserPlus, Pizza, Car, RefreshCw, X } from "lucide-react";
 import { useCustomers } from "../features/customers/hooks/useCustomers";
 import { useIngredients } from "../features/ingredients/hooks/useIngredients";
 import { useOrders } from "../features/orders/hooks/useOrders";
 import { useProducts } from "../features/products/hooks/useProducts";
 import { useAppSettings } from "../features/settings/hooks/useAppSettings";
+import ToastNotifications, { useToastNotifications } from "../components/common/ToastNotifications";
 import { buildExpectedAtIso, buildTimeSlotsForDate, getTodayDateInputValue } from "../lib/order-slots";
 import { centsToEuro } from "../lib/money";
 import { createCustomer, deleteCustomer, updateCustomer } from "../services/ipc/customers.ipc";
-import { createOrder, updateOrder, updateOrderStatus } from "../services/ipc/orders.ipc";
+import { createOrder, deleteOrder, updateOrder, updateOrderStatus } from "../services/ipc/orders.ipc";
 
 const NEXT_STATUS_OPTIONS = {
   IN_ATTESA: ["CONFERMATO", "IN_PREPARAZIONE", "ANNULLATO"],
@@ -37,7 +38,8 @@ const STATUS_BADGE_CLASS = {
   ANNULLATO: "border border-rose-200 bg-rose-50 text-rose-800",
 };
 
-const BASE_CATEGORY_ORDER = ["PIZZA", "BEVANDA", "ALTRO"];
+const PIZZA_FAMILY_CATEGORY_KEYS = new Set(["PIZZA", "PIZZA_STAGIONALI", "PIZZA_SPECIALI"]);
+const BASE_CATEGORY_ORDER = ["PIZZA", "PIZZA_STAGIONALI", "PIZZA_SPECIALI", "BEVANDA", "ALTRO"];
 const ACTIVE_ORDER_STATUSES = new Set(["IN_ATTESA", "CONFERMATO", "IN_PREPARAZIONE", "PRONTO"]);
 
 function buildDefaultFormState(businessDate, availableTimeSlots) {
@@ -58,6 +60,8 @@ function getCategoryLabel(category, categoryLabels) {
   const labels = {
     ALL: "Tutti",
     PIZZA: "Pizze",
+    PIZZA_STAGIONALI: "Pizze stagionali",
+    PIZZA_SPECIALI: "Pizze speciali",
     BEVANDA: "Bevanda",
     ALTRO: "Altro",
   };
@@ -139,6 +143,16 @@ function getBaseIngredientsFromProduct(product) {
     .filter((ingredient) => ingredient && ingredient.id);
 }
 
+function getProductIngredientNames(product, ingredientById) {
+  if (!Array.isArray(product?.productIngredients)) {
+    return [];
+  }
+
+  return product.productIngredients
+    .map((link) => link.ingredient?.name ?? ingredientById.get(link.ingredientId)?.name)
+    .filter(Boolean);
+}
+
 function buildLineItemId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -158,7 +172,7 @@ function isUnmodifiedCartItem(item) {
 }
 
 function isPizzaCategory(category) {
-  return category === "PIZZA";
+  return PIZZA_FAMILY_CATEGORY_KEYS.has(category);
 }
 
 function buildRemoveModifier(ingredient) {
@@ -277,6 +291,26 @@ function formatTimeSlotFromIso(value) {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+function extractDateFilterValue(value) {
+  if (!value) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    const raw = value.trim();
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      return raw;
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) {
+      return raw.slice(0, 10);
+    }
+  }
+
+  return formatDateInputFromIso(value);
+}
+
 function buildCustomizationState() {
   return {
     isOpen: false,
@@ -303,21 +337,26 @@ function cloneBaseIngredients(baseIngredients) {
 
 function Modal({ title, onClose, children }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="w-full max-w-2xl border border-slate-200 bg-white shadow-xl">
-        <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-600">{title}</h3>
-          <button type="button" onClick={onClose} className="text-sm font-semibold text-slate-500">
-            Chiudi
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm transition-opacity">
+      <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/5">
+        <header className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-6 py-4">
+          <h3 className="text-base font-semibold text-slate-800">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X size={20} />
           </button>
         </header>
-        <section className="p-4">{children}</section>
+        <section className="p-6">{children}</section>
       </div>
     </div>
   );
 }
 
 export default function OrdersPage() {
+  const [activeView, setActiveView] = useState("compose");
   const todayDate = useMemo(() => getTodayDateInputValue(), []);
   const { orders, loading, error, reload } = useOrders();
   const { customers, reload: reloadCustomers } = useCustomers();
@@ -342,9 +381,16 @@ export default function OrdersPage() {
   const [isCustomerSearchOpen, setIsCustomerSearchOpen] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState("");
   const [statusUpdatingOrderId, setStatusUpdatingOrderId] = useState("");
+  const [listCustomerFilter, setListCustomerFilter] = useState("");
+  const [listTypeFilter, setListTypeFilter] = useState("ALL");
+  const [listDateFilter, setListDateFilter] = useState(todayDate);
+  const [listSortBy, setListSortBy] = useState("RECENT");
+  const [deleteOrderRequest, setDeleteOrderRequest] = useState(null);
+  const [deletingOrderId, setDeletingOrderId] = useState("");
   const [statusChangeRequest, setStatusChangeRequest] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const { toasts, pushToast, dismissToast } = useToastNotifications();
   const categoryLabels = appSettings?.categoryLabels;
 
   const categoryOrder = useMemo(() => {
@@ -425,7 +471,13 @@ export default function OrdersPage() {
 
   const cartCategoryCounters = useMemo(() => {
     return cartItems.reduce((acc, item) => {
-      const key = item.productCategory;
+      const rawCategory = item.productCategory;
+
+      if (!rawCategory) {
+        return acc;
+      }
+
+      const key = isPizzaCategory(rawCategory) ? "PIZZA" : rawCategory;
 
       if (!key) {
         return acc;
@@ -502,6 +554,55 @@ export default function OrdersPage() {
 
     return orders.find((order) => order.id === statusChangeRequest.orderId) ?? null;
   }, [orders, statusChangeRequest]);
+
+  const filteredOrdersForList = useMemo(() => {
+    const normalizedCustomerQuery = normalizeSearchText(listCustomerFilter);
+
+    const filtered = orders.filter((order) => {
+      if (listTypeFilter !== "ALL" && order.type !== listTypeFilter) {
+        return false;
+      }
+
+      if (listDateFilter) {
+        const orderDate = extractDateFilterValue(order.businessDate ?? order.expectedAt);
+
+        if (orderDate !== listDateFilter) {
+          return false;
+        }
+      }
+
+      if (!normalizedCustomerQuery) {
+        return true;
+      }
+
+      const customerName = normalizeSearchText(order.customer?.name ?? "Banco");
+      return customerName.includes(normalizedCustomerQuery);
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      if (listSortBy === "CUSTOMER") {
+        const nameA = normalizeSearchText(a.customer?.name ?? "Banco");
+        const nameB = normalizeSearchText(b.customer?.name ?? "Banco");
+        const byName = nameA.localeCompare(nameB, "it-IT");
+
+        if (byName !== 0) {
+          return byName;
+        }
+      }
+
+      const timestampA = new Date(a.expectedAt ?? a.businessDate ?? 0).getTime() || 0;
+      const timestampB = new Date(b.expectedAt ?? b.businessDate ?? 0).getTime() || 0;
+
+      if (listSortBy === "OLDEST") {
+        return timestampA - timestampB;
+      }
+
+      // Default and CUSTOMER fallback: most recent first.
+      return timestampB - timestampA;
+    });
+
+    return sorted;
+  }, [listCustomerFilter, listDateFilter, listSortBy, listTypeFilter, orders]);
 
   useEffect(() => {
     if (!selectedCustomer) {
@@ -828,6 +929,7 @@ export default function OrdersPage() {
       notes: order.notes ?? "",
     });
     setCartItems(buildCartItemsFromOrder(order));
+    setActiveView("compose");
   }
 
   function cancelEditingOrder() {
@@ -837,6 +939,7 @@ export default function OrdersPage() {
 
   async function handleSubmitOrder(event) {
     event.preventDefault();
+    const wasEditing = Boolean(editingOrderId);
 
     if (cartItems.length === 0) {
       setActionError(new Error("Aggiungi almeno un prodotto al carrello."));
@@ -895,8 +998,10 @@ export default function OrdersPage() {
 
       resetOrderComposer();
       await reload();
+      pushToast(wasEditing ? "Ordine aggiornato con successo." : "Ordine confermato con successo.");
     } catch (err) {
       setActionError(err);
+      pushToast(err?.message || "Operazione non riuscita.", "error");
     } finally {
       setSubmitting(false);
     }
@@ -909,8 +1014,10 @@ export default function OrdersPage() {
     try {
       await updateOrderStatus({ orderId, nextStatus });
       await reload();
+      pushToast(`Stato ordine aggiornato: ${getStatusLabel(nextStatus)}.`);
     } catch (err) {
       setActionError(err);
+      pushToast(err?.message || "Aggiornamento stato non riuscito.", "error");
     } finally {
       setStatusUpdatingOrderId("");
     }
@@ -928,6 +1035,46 @@ export default function OrdersPage() {
 
   function closeStatusChangeModal() {
     setStatusChangeRequest(null);
+  }
+
+  function openDeleteOrderConfirm(orderId) {
+    const selectedOrder = orders.find((order) => order.id === orderId) ?? null;
+
+    if (!selectedOrder) {
+      return;
+    }
+
+    setDeleteOrderRequest(selectedOrder);
+  }
+
+  function closeDeleteOrderConfirm() {
+    setDeleteOrderRequest(null);
+  }
+
+  async function confirmDeleteOrder() {
+    if (!deleteOrderRequest?.id) {
+      return;
+    }
+
+    setActionError(null);
+    setDeletingOrderId(deleteOrderRequest.id);
+
+    try {
+      await deleteOrder({ orderId: deleteOrderRequest.id });
+
+      if (editingOrderId === deleteOrderRequest.id) {
+        resetOrderComposer();
+      }
+
+      setDeleteOrderRequest(null);
+      await reload();
+      pushToast("Ordine eliminato con successo.");
+    } catch (err) {
+      setActionError(err);
+      pushToast(err?.message || "Eliminazione ordine non riuscita.", "error");
+    } finally {
+      setDeletingOrderId("");
+    }
   }
 
   async function confirmCancelStatusChange() {
@@ -1002,8 +1149,10 @@ export default function OrdersPage() {
       setCustomerForm(buildCustomerFormState());
       setIsCustomerModalOpen(false);
       await reloadCustomers();
+      pushToast(customerModalMode === "edit" ? "Cliente aggiornato con successo." : "Cliente creato con successo.");
     } catch (err) {
       setActionError(err);
+      pushToast(err?.message || "Salvataggio cliente non riuscito.", "error");
     } finally {
       setCustomerSubmitting(false);
     }
@@ -1041,8 +1190,10 @@ export default function OrdersPage() {
       setCustomerForm(buildCustomerFormState());
       setIsCustomerModalOpen(false);
       await reloadCustomers();
+      pushToast("Cliente eliminato con successo.");
     } catch (err) {
       setActionError(err);
+      pushToast(err?.message || "Eliminazione cliente non riuscita.", "error");
     } finally {
       setCustomerSubmitting(false);
     }
@@ -1057,392 +1208,491 @@ export default function OrdersPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      <ToastNotifications toasts={toasts} onDismiss={dismissToast} />
+
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-2xl font-bold tracking-tight text-slate-800">Ordini</h2>
+
+        <div className="flex space-x-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+          <button
+            type="button"
+            onClick={() => setActiveView("compose")}
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${activeView === "compose"
+                ? "border border-slate-200/60 bg-white text-slate-900 shadow-[0_1px_3px_rgba(0,0,0,0.05)]"
+                : "text-slate-500 hover:text-slate-700"
+              }`}
+          >
+            Crea ordine
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveView("list")}
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${activeView === "list"
+                ? "border border-slate-200/60 bg-white text-slate-900 shadow-[0_1px_3px_rgba(0,0,0,0.05)]"
+                : "text-slate-500 hover:text-slate-700"
+              }`}
+          >
+            Lista ordinazioni
+          </button>
+        </div>
+      </header>
+
       {/* Blocco principale: composizione nuovo ordine (catalogo + carrello) */}
-      <section className="ui-surface p-4">
-        <form className="grid gap-4 xl:grid-cols-[1fr_360px]" onSubmit={handleSubmitOrder}>
-          {/* Colonna sinistra: filtri e catalogo prodotti */}
-          <div className="space-y-4">
-            {/* Riga filtri ordine: cliente, tipo, data, orario, ricerca */}
-            <section className="grid gap-3 border-b border-slate-200 pb-4 md:grid-cols-2 xl:grid-cols-5">
-              <div className="relative grid gap-1 text-sm text-slate-600">
-                <span>Cliente</span>
-                <div className="relative">
-                  <Search size={14} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    value={customerSearchQuery}
-                    onFocus={() => setIsCustomerSearchOpen(true)}
-                    onChange={(event) => {
-                      setCustomerSearchQuery(event.target.value);
-                      setIsCustomerSearchOpen(true);
-                    }}
-                    placeholder="Cerca cliente, via o telefono..."
-                    className="w-full border border-slate-200 bg-slate-50 py-2 pl-7 pr-2 text-sm"
-                  />
-                  {isCustomerSearchOpen && (
-                    <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto border border-slate-200 bg-white shadow-lg">
+      {activeView === "compose" && (
+        <section className="ui-surface min-h-[620px] p-4 sm:p-5">
+          <form className="grid gap-5 xl:grid-cols-[1fr_360px]" onSubmit={handleSubmitOrder}>
+            {/* Colonna sinistra: filtri e catalogo prodotti */}
+            <div className="space-y-4">
+              {/* Riga filtri ordine: cliente, tipo, data, orario, ricerca */}
+              <section className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4 md:grid-cols-2 xl:grid-cols-3">
+                <div className="relative grid gap-1.5 text-sm text-slate-600">
+                  <span>Cliente</span>
+                  <div className="relative">
+                    <Search size={14} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={customerSearchQuery}
+                      onFocus={() => setIsCustomerSearchOpen(true)}
+                      onChange={(event) => {
+                        setCustomerSearchQuery(event.target.value);
+                        setIsCustomerSearchOpen(true);
+                      }}
+                      placeholder="Cerca cliente, via o telefono..."
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                    />
+                    {isCustomerSearchOpen && (
+                      <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-black/5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleSelectCustomer("");
+                            setCustomerSearchQuery("");
+                          }}
+                          className="block w-full border-b border-slate-100 px-2 py-2 text-left text-sm text-slate-700 hover:bg-emerald-50"
+                        >
+                          Cliente al banco
+                        </button>
+
+                        {filteredCustomers.map((customer) => (
+                          <button
+                            key={customer.id}
+                            type="button"
+                            onClick={() => {
+                              handleSelectCustomer(customer.id);
+                              setCustomerSearchQuery(formatCustomerSearchLabel(customer));
+                            }}
+                            className="block w-full border-b border-slate-100 px-2 py-2 text-left hover:bg-emerald-50"
+                          >
+                            <span className="flex items-center gap-1 text-sm font-semibold text-slate-900">
+                              {customersWithActiveOrders.has(customer.id) && (
+                                <Clock3 size={13} className="text-amber-600" />
+                              )}
+                              <span>
+                                {customer.name}
+                                {customer.isTemporary ? " (temporaneo oggi)" : ""}
+                              </span>
+                            </span>
+                            {customer.address && (
+                              <span className="block text-xs text-slate-600">{customer.address}</span>
+                            )}
+                            {customer.phone && (
+                              <span className="block text-xs text-slate-500">{customer.phone}</span>
+                            )}
+                          </button>
+                        ))}
+
+                        {filteredCustomers.length === 0 && (
+                          <p className="px-2 py-2 text-sm text-slate-500">Nessun cliente trovato</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openCreateCustomerModal}
+                    className="ui-btn ui-btn-success inline-flex w-fit items-center gap-1 px-2 py-1 text-xs shadow-sm"
+                  >
+                    <UserPlus size={13} />
+                    Nuovo cliente
+                  </button>
+
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      onClick={openEditCustomerModal}
+                      disabled={!selectedCustomer}
+                      className="ui-btn ui-btn-accent inline-flex w-fit items-center gap-1 px-2 py-1 text-xs"
+                    >
+                      <Pencil size={13} />
+                      Modifica
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-sm text-slate-600">Tipo ordine</span>
+                    <div className="flex h-10 w-full overflow-hidden rounded-lg border border-slate-200 bg-white">
+                      <button
+                        type="button"
+                        onClick={() => setFormData((prev) => ({ ...prev, type: "ASPORTO" }))}
+                        className={`flex-1 px-3 py-1 text-xs transition-colors ${formData.type === "ASPORTO"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "text-slate-500 hover:bg-slate-50"
+                          }`}
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <Pizza size={14} />
+                          Asporto
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData((prev) => ({ ...prev, type: "DOMICILIO" }))}
+                        className={`flex-1 px-3 py-1 text-xs font-semibold transition-colors ${formData.type === "DOMICILIO"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "text-slate-500 hover:bg-slate-50"
+                          }`}
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <Car size={14} />
+                          Domicilio
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <span className="text-sm text-slate-600">Data ordine</span>
+                    <div className="relative flex h-10 w-full items-center overflow-hidden rounded-lg border border-slate-200 bg-white">
                       <button
                         type="button"
                         onClick={() => {
-                          handleSelectCustomer("");
-                          setCustomerSearchQuery("");
+                          const input = document.getElementById("hidden-date-input");
+                          if (input) input.showPicker();
                         }}
-                        className="block w-full border-b border-slate-100 px-2 py-2 text-left text-sm text-slate-700 hover:bg-teal-50"
+                        className="flex h-full items-center justify-center border-r border-slate-200 bg-slate-100 px-3 text-slate-600 hover:bg-slate-200 focus:outline-none"
                       >
-                        Cliente al banco
+                        <Calendar size={16} />
                       </button>
-
-                      {filteredCustomers.map((customer) => (
-                        <button
-                          key={customer.id}
-                          type="button"
-                          onClick={() => {
-                            handleSelectCustomer(customer.id);
-                            setCustomerSearchQuery(formatCustomerSearchLabel(customer));
-                          }}
-                          className="block w-full border-b border-slate-100 px-2 py-2 text-left hover:bg-teal-50"
-                        >
-                          <span className="flex items-center gap-1 text-sm font-semibold text-slate-900">
-                            {customersWithActiveOrders.has(customer.id) && (
-                              <Clock3 size={13} className="text-amber-600" />
-                            )}
-                            <span>
-                              {customer.name}
-                              {customer.isTemporary ? " (temporaneo oggi)" : ""}
-                            </span>
-                          </span>
-                          {customer.address && (
-                            <span className="block text-xs text-slate-600">{customer.address}</span>
-                          )}
-                          {customer.phone && (
-                            <span className="block text-xs text-slate-500">{customer.phone}</span>
-                          )}
-                        </button>
-                      ))}
-
-                      {filteredCustomers.length === 0 && (
-                        <p className="px-2 py-2 text-sm text-slate-500">Nessun cliente trovato</p>
-                      )}
+                      <span className="flex-1 px-3 text-sm font-medium text-slate-700">
+                        {new Date(formData.businessDate).toLocaleDateString("it-IT", {
+                          weekday: "short",
+                          day: "2-digit",
+                          month: "2-digit",
+                        })}
+                      </span>
+                      <input
+                        id="hidden-date-input"
+                        type="date"
+                        value={formData.businessDate}
+                        onChange={(event) =>
+                          setFormData((prev) => ({ ...prev, businessDate: event.target.value }))
+                        }
+                        className="absolute inset-0 h-full w-full opacity-0"
+                        style={{ pointerEvents: "none" }}
+                      />
                     </div>
-                  )}
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={openCreateCustomerModal}
-                  className="ui-btn ui-btn-success inline-flex w-fit items-center gap-1 px-2 py-1 text-xs"
-                >
-                  <UserPlus size={13} />
-                  Nuovo cliente
-                </button>
 
-                <div className="flex flex-wrap gap-1">
-                  <button
-                    type="button"
-                    onClick={openEditCustomerModal}
-                    disabled={!selectedCustomer}
-                    className="ui-btn ui-btn-accent inline-flex w-fit items-center gap-1 px-2 py-1 text-xs"
+                <label className="grid gap-1 text-sm text-slate-600">
+                  Orario
+                  <select
+                    value={formData.expectedTimeSlot}
+                    onChange={(event) =>
+                      setFormData((prev) => ({ ...prev, expectedTimeSlot: event.target.value }))
+                    }
+                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                   >
-                    <Pencil size={13} />
-                    Modifica
-                  </button>
+                    {availableTimeSlots.length === 0 && <option value="">Nessuno slot disponibile</option>}
+                    {availableTimeSlots.map((slot) => (
+                      <option key={slot} value={slot}>
+                        {slot}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </section>
+
+              {/* Sezione catalogo: categorie e griglia prodotti */}
+              <section className="space-y-3">
+                {/* Filtri categoria prodotto */}
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {["ALL", ...categoryOrder].map((category) => {
+                      const isActive = selectedCategory === category;
+
+                      return (
+                        <button
+                          key={category}
+                          type="button"
+                          onClick={() => setSelectedCategory(category)}
+                          className={`rounded-md border px-3 py-1.5 text-xs font-semibold tracking-wide transition-colors ${isActive
+                              ? "border-emerald-600 bg-emerald-600 text-white"
+                              : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                            }`}
+                        >
+                          {getCategoryLabel(category, categoryLabels)}
+                        </button>
+                      );
+                    })}
+
+                    <div className="relative ml-auto w-full min-w-[240px] grow sm:max-w-sm">
+                      <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        placeholder="Cerca per nome..."
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {productsLoading && <p className="text-sm text-slate-500">Caricamento prodotti...</p>}
+
+                {!productsLoading && visibleProducts.length === 0 && (
+                  <p className="text-sm text-slate-500">Nessun prodotto trovato per i filtri selezionati.</p>
+                )}
+
+                {!productsLoading && visibleProducts.length > 0 && selectedCategory !== "ALL" && (
+                  /* Griglia card prodotto */
+                  <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {visibleProducts.map((product) => {
+                      const ingredientNames = getProductIngredientNames(product, ingredientById);
+
+                      return (
+                        <li key={product.id}>
+                        <button
+                          type="button"
+                          onClick={() => addProductToCart(product)}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            openCustomizationForProduct(product);
+                          }}
+                          className="group grid w-full gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md hover:shadow-slate-200/50"
+                        >
+                          <span className="text-sm font-semibold text-slate-900">{product.name}</span>
+                          <span className="w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                            {getCategoryLabel(product.category, categoryLabels)}
+                          </span>
+                          {ingredientNames.length > 0 && (
+                            <span className="text-xs leading-4 text-slate-500">
+                              {ingredientNames.join(", ")}
+                            </span>
+                          )}
+                          <span className="text-sm font-bold text-emerald-700">{formatEuroLabel(product.priceCents)}</span>
+                        </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+
+                {!productsLoading && visibleProducts.length > 0 && selectedCategory === "ALL" && (
+                  <div className="space-y-4">
+                    {groupedVisibleProducts.map((group) => (
+                      <section key={group.category} className="space-y-2">
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {getCategoryLabel(group.category, categoryLabels)}
+                        </h4>
+
+                        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                          {group.items.map((product) => {
+                            const ingredientNames = getProductIngredientNames(product, ingredientById);
+
+                            return (
+                              <li key={product.id}>
+                              <button
+                                type="button"
+                                onClick={() => addProductToCart(product)}
+                                onContextMenu={(event) => {
+                                  event.preventDefault();
+                                  openCustomizationForProduct(product);
+                                }}
+                                className="group grid w-full gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md hover:shadow-slate-200/50"
+                              >
+                                <span className="text-sm font-semibold text-slate-900">{product.name}</span>
+                                <span className="w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                                  {getCategoryLabel(product.category, categoryLabels)}
+                                </span>
+                                {ingredientNames.length > 0 && (
+                                  <span className="text-xs leading-4 text-slate-500">
+                                    Ingredienti: {ingredientNames.join(", ")}
+                                  </span>
+                                )}
+                                <span className="text-sm font-bold text-emerald-700">{formatEuroLabel(product.priceCents)}</span>
+                              </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </section>
+                    ))}
+                  </div>
+                )}
+
+                <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  Suggerimento: tasto destro su un prodotto per aprire la personalizzazione prima di aggiungerlo.
+                </p>
+              </section>
+            </div>
+
+            {/* Colonna destra: riepilogo carrello e conferma ordine */}
+            <aside className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+              {/* Testata carrello con dati sintetici ordine */}
+              <div className="mb-3 border-b border-slate-200 pb-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      {editingOrder ? `Modifica ordine #${editingOrder.dailyNumber}` : "Nuovo ordine"}
+                    </p>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {selectedCustomer ? selectedCustomer.name : "Cliente al banco"}
+                    </p>
+                    <p className="text-xs text-slate-500">{formData.type}</p>
+                    <p className="text-xs text-slate-500">Data: {formatDateLabel(formData.businessDate)}</p>
+                    <p className="text-xs text-slate-500">Orario: {formData.expectedTimeSlot || "-"}</p>
+                  </div>
+
+                  <div className="flex flex-col gap-1 text-right">
+                    {visibleCartCategoryCounters.map((counter) => (
+                      <span key={counter.category} className="text-[11px] font-semibold text-slate-500">
+                        {getCategoryLabel(counter.category, categoryLabels)}: {counter.quantity}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <label className="grid gap-1 text-sm text-slate-600">
-                Tipo ordine
-                <select
-                  value={formData.type}
-                  onChange={(event) => setFormData((prev) => ({ ...prev, type: event.target.value }))}
-                  className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
-                >
-                  <option value="ASPORTO">Asporto</option>
-                  <option value="DOMICILIO">Domicilio</option>
-                </select>
-              </label>
-
-              <label className="grid gap-1 text-sm text-slate-600">
-                Data ordine
-                <input
-                  type="date"
-                  value={formData.businessDate}
-                  onChange={(event) =>
-                    setFormData((prev) => ({ ...prev, businessDate: event.target.value }))
-                  }
-                  className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
-                />
-              </label>
-
-              <label className="grid gap-1 text-sm text-slate-600">
-                Orario
-                <select
-                  value={formData.expectedTimeSlot}
-                  onChange={(event) =>
-                    setFormData((prev) => ({ ...prev, expectedTimeSlot: event.target.value }))
-                  }
-                  className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
-                >
-                  {availableTimeSlots.length === 0 && <option value="">Nessuno slot disponibile</option>}
-                  {availableTimeSlots.map((slot) => (
-                    <option key={slot} value={slot}>
-                      {slot}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="grid gap-1 text-sm text-slate-600">
-                Cerca prodotto
-                <input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Cerca per nome..."
-                  className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
-                />
-              </label>
-            </section>
-
-            {/* Sezione catalogo: categorie e griglia prodotti */}
-            <section className="space-y-3">
-              {/* Filtri categoria prodotto */}
-              <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-                {["ALL", ...categoryOrder].map((category) => {
-                  const isActive = selectedCategory === category;
-
-                  return (
-                    <button
-                      key={category}
-                      type="button"
-                      onClick={() => setSelectedCategory(category)}
-                      className={
-                        isActive
-                          ? "border border-teal-700 bg-teal-700 px-3 py-1 text-xs font-semibold tracking-wide text-white"
-                          : "border border-slate-300 bg-white px-3 py-1 text-xs font-semibold tracking-wide text-slate-600 hover:bg-teal-50"
-                      }
-                    >
-                      {getCategoryLabel(category, categoryLabels)}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {productsLoading && <p className="text-sm text-slate-500">Caricamento prodotti...</p>}
-
-              {!productsLoading && visibleProducts.length === 0 && (
-                <p className="text-sm text-slate-500">Nessun prodotto trovato per i filtri selezionati.</p>
-              )}
-
-              {!productsLoading && visibleProducts.length > 0 && selectedCategory !== "ALL" && (
-                /* Griglia card prodotto */
-                <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {visibleProducts.map((product) => (
-                    <li key={product.id}>
+              {/* Lista righe carrello */}
+              <ul className="max-h-[560px] space-y-2 overflow-auto pr-1">
+                {cartItems.map((item) => (
+                  <li key={item.lineItemId} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-900">{item.productName}</p>
                       <button
                         type="button"
-                        onClick={() => addProductToCart(product)}
-                        onContextMenu={(event) => {
-                          event.preventDefault();
-                          openCustomizationForProduct(product);
-                        }}
-                        className="grid w-full gap-1 border border-slate-200 bg-slate-50 px-3 py-3 text-left transition hover:bg-slate-100"
+                        onClick={() => removeCartItem(item.lineItemId)}
+                        className="inline-flex items-center justify-center rounded-md p-1 text-rose-700 transition-colors hover:bg-rose-50"
+                        aria-label="Rimuovi riga dal carrello"
+                        title="Rimuovi"
                       >
-                        <span className="text-sm font-semibold text-slate-900">{product.name}</span>
-                        <span className="text-xs text-slate-500">{getCategoryLabel(product.category, categoryLabels)}</span>
-                        <span className="text-sm font-bold text-slate-700">{formatEuroLabel(product.priceCents)}</span>
+                        <Trash2 size={14} />
                       </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+                    </div>
 
-              {!productsLoading && visibleProducts.length > 0 && selectedCategory === "ALL" && (
-                <div className="space-y-4">
-                  {groupedVisibleProducts.map((group) => (
-                    <section key={group.category} className="space-y-2">
-                      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {getCategoryLabel(group.category, categoryLabels)}
-                      </h4>
-
-                      <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                        {group.items.map((product) => (
-                          <li key={product.id}>
-                            <button
-                              type="button"
-                              onClick={() => addProductToCart(product)}
-                              onContextMenu={(event) => {
-                                event.preventDefault();
-                                openCustomizationForProduct(product);
-                              }}
-                              className="grid w-full gap-1 border border-slate-200 bg-slate-50 px-3 py-3 text-left transition hover:bg-slate-100"
-                            >
-                              <span className="text-sm font-semibold text-slate-900">{product.name}</span>
-                              <span className="text-xs text-slate-500">{getCategoryLabel(product.category, categoryLabels)}</span>
-                              <span className="text-sm font-bold text-slate-700">{formatEuroLabel(product.priceCents)}</span>
-                            </button>
+                    {Array.isArray(item.modifiers) && item.modifiers.length > 0 && (
+                      <ul className="mt-1 space-y-0.5 text-[11px] text-slate-500">
+                        {item.modifiers.map((modifier, index) => (
+                          <li key={`${modifier.action}-${modifier.ingredientId}-${index}`}>
+                            {modifier.action === "RIMUOVI" ? "-" : "+"} {modifier.ingredientName} ({formatModifierPriceLabel(modifier.priceAppliedCents)})
                           </li>
                         ))}
                       </ul>
-                    </section>
-                  ))}
-                </div>
-              )}
+                    )}
 
-              <p className="text-xs text-slate-500">
-                Suggerimento: tasto destro su un prodotto per aprire la personalizzazione prima di aggiungerlo.
-              </p>
-            </section>
-          </div>
+                    {item.notes?.trim() && <p className="mt-1 text-xs text-slate-500">Nota: {item.notes}</p>}
 
-          {/* Colonna destra: riepilogo carrello e conferma ordine */}
-          <aside className="border border-slate-200 bg-slate-50 p-3">
-            {/* Testata carrello con dati sintetici ordine */}
-            <div className="mb-3 border-b border-slate-200 pb-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {editingOrder ? `Modifica ordine #${editingOrder.dailyNumber}` : "Nuovo ordine"}
-                  </p>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {selectedCustomer ? selectedCustomer.name : "Cliente al banco"}
-                  </p>
-                  <p className="text-xs text-slate-500">{formData.type}</p>
-                  <p className="text-xs text-slate-500">Data: {formatDateLabel(formData.businessDate)}</p>
-                  <p className="text-xs text-slate-500">Orario: {formData.expectedTimeSlot || "-"}</p>
-                </div>
+                    <p className="text-xs text-slate-500">{formatEuroLabel(item.unitPriceCents)} cad.</p>
 
-                <div className="flex flex-col gap-1 text-right">
-                  {visibleCartCategoryCounters.map((counter) => (
-                    <span key={counter.category} className="text-[11px] font-semibold text-slate-500">
-                      {getCategoryLabel(counter.category, categoryLabels)}: {counter.quantity}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      {/* Controlli quantita riga */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => decreaseCartItem(item.lineItemId)}
+                          className="border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+                        >
+                          -
+                        </button>
+                        <span className="min-w-6 text-center text-sm font-semibold text-slate-800">{item.quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => increaseCartItem(item.lineItemId)}
+                          className="border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+                        >
+                          +
+                        </button>
+                      </div>
 
-            {/* Lista righe carrello */}
-            <ul className="max-h-[560px] space-y-2 overflow-auto pr-1">
-              {cartItems.map((item) => (
-                <li key={item.lineItemId} className="border border-slate-200 bg-white p-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-slate-900">{item.productName}</p>
-                    <button
-                      type="button"
-                      onClick={() => removeCartItem(item.lineItemId)}
-                      className="inline-flex items-center justify-center text-rose-700"
-                      aria-label="Rimuovi riga dal carrello"
-                      title="Rimuovi"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-
-                  {Array.isArray(item.modifiers) && item.modifiers.length > 0 && (
-                    <ul className="mt-1 space-y-0.5 text-[11px] text-slate-500">
-                      {item.modifiers.map((modifier, index) => (
-                        <li key={`${modifier.action}-${modifier.ingredientId}-${index}`}>
-                          {modifier.action === "RIMUOVI" ? "-" : "+"} {modifier.ingredientName} ({formatModifierPriceLabel(modifier.priceAppliedCents)})
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
-                  {item.notes?.trim() && <p className="mt-1 text-xs text-slate-500">Nota: {item.notes}</p>}
-
-                  <p className="text-xs text-slate-500">{formatEuroLabel(item.unitPriceCents)} cad.</p>
-
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    {/* Controlli quantita riga */}
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => decreaseCartItem(item.lineItemId)}
-                        className="border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
-                      >
-                        -
-                      </button>
-                      <span className="min-w-6 text-center text-sm font-semibold text-slate-800">{item.quantity}</span>
-                      <button
-                        type="button"
-                        onClick={() => increaseCartItem(item.lineItemId)}
-                        className="border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
-                      >
-                        +
-                      </button>
-                    </div>
-
-                    {/* Totali riga e azioni */}
-                    <div className="text-right">
-                      <p className="text-[11px] text-slate-500">
-                        Variazioni: {formatEuroLabel(computeModifiersPerUnit(item.modifiers))}
-                      </p>
-                      <p className="text-sm font-bold text-slate-900">
-                        {formatEuroLabel(
-                          item.quantity * (item.unitPriceCents + computeModifiersPerUnit(item.modifiers))
+                      {/* Totali riga e azioni */}
+                      <div className="text-right">
+                        {Array.isArray(item.modifiers) && item.modifiers.length > 0 && (
+                          <p className="text-[11px] text-slate-500">
+                            {computeModifiersPerUnit(item.modifiers) > 0 ? `+${formatEuroLabel(computeModifiersPerUnit(item.modifiers))}` : `${formatEuroLabel(computeModifiersPerUnit(item.modifiers))}`}
+                          </p>
                         )}
-                      </p>
+                        <p className="text-sm font-bold text-slate-900">
+                          {formatEuroLabel(
+                            item.quantity * (item.unitPriceCents + computeModifiersPerUnit(item.modifiers))
+                          )}
+                        </p>
 
-                      <button
-                        type="button"
-                        onClick={() => openCustomizationForCartItem(item)}
-                        className="inline-flex items-center justify-center text-slate-700"
-                        aria-label="Personalizza riga carrello"
-                        title="Personalizza"
-                      >
-                        <Pencil size={14} />
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => openCustomizationForCartItem(item)}
+                          className="inline-flex items-center justify-center rounded-md p-1 text-slate-700 transition-colors hover:bg-slate-100"
+                          aria-label="Personalizza riga carrello"
+                          title="Personalizza"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
 
-            {cartItems.length === 0 && (
-              <p className="py-6 text-center text-sm text-slate-500">Seleziona prodotti per riempire il carrello.</p>
-            )}
-
-            {/* Footer carrello: totale ordine + submit */}
-            <div className="mt-3 border-t border-slate-200 pt-3">
-              <label className="mb-3 grid gap-1 text-sm text-slate-600">
-                Nota ordine
-                <textarea
-                  value={formData.notes}
-                  onChange={(event) => setFormData((prev) => ({ ...prev, notes: event.target.value }))}
-                  rows={2}
-                  placeholder="Es. Vuole POS, Pagato, ben cotte..."
-                  className="border border-slate-200 bg-white px-2 py-2 text-sm"
-                />
-              </label>
-
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-600">Totale</span>
-                <span className="text-xl font-bold text-slate-900">{formatEuroLabel(totalAmountCents)}</span>
-              </div>
-
-              <button
-                type="submit"
-                disabled={submitting || cartItems.length === 0}
-                className="ui-btn ui-btn-success w-full px-3 py-2 text-sm"
-              >
-                {submitting ? "Salvataggio..." : editingOrderId ? "Salva modifiche ordine" : "Conferma ordine"}
-              </button>
-
-              {editingOrderId && (
-                <button
-                  type="button"
-                  onClick={cancelEditingOrder}
-                  className="mt-2 w-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
-                >
-                  Annulla modifica
-                </button>
+              {cartItems.length === 0 && (
+                <p className="py-6 text-center text-sm text-slate-500">Seleziona prodotti per riempire il carrello.</p>
               )}
-            </div>
-          </aside>
-        </form>
-      </section>
+
+              {/* Footer carrello: totale ordine + submit */}
+              <div className="mt-3 border-t border-slate-200 pt-3">
+                <label className="mb-3 grid gap-1 text-sm text-slate-600">
+                  Nota ordine
+                  <textarea
+                    value={formData.notes}
+                    onChange={(event) => setFormData((prev) => ({ ...prev, notes: event.target.value }))}
+                    rows={2}
+                    placeholder="Es. Vuole POS, Pagato, ben cotte..."
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                </label>
+
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-slate-600">Totale</span>
+                  <span className="text-xl font-bold text-slate-900">{formatEuroLabel(totalAmountCents)}</span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={submitting || cartItems.length === 0}
+                  className="ui-btn ui-btn-success w-full px-3 py-2 text-sm"
+                >
+                  {submitting ? "Salvataggio..." : editingOrderId ? "Salva modifiche ordine" : "Conferma ordine"}
+                </button>
+
+                {editingOrderId && (
+                  <button
+                    type="button"
+                    onClick={cancelEditingOrder}
+                    className="ui-btn ui-btn-neutral mt-2 w-full px-3 py-2 text-sm"
+                  >
+                    Annulla modifica
+                  </button>
+                )}
+              </div>
+            </aside>
+          </form>
+        </section>
+      )}
 
       {/* Messaggi errore pagina */}
-      {error && <p className="text-sm text-red-600">{error.message}</p>}
-      {actionError && <p className="text-sm text-red-600">{actionError.message}</p>}
+      {error && <p className="text-sm text-rose-600">{error.message}</p>}
+      {actionError && <p className="text-sm text-rose-600">{actionError.message}</p>}
 
       {/* Modal personalizzazione prodotto/riga carrello */}
       {customization.isOpen && (
@@ -1450,25 +1700,25 @@ export default function OrdersPage() {
           title={customization.mode === "add" ? "Personalizza prodotto" : "Modifica personalizzazione"}
           onClose={closeCustomizationModal}
         >
-          <div className="space-y-3">
+          <div className="space-y-4">
             {/* Header modal: nome prodotto e prezzo base */}
-            <div className="border border-slate-200 bg-slate-50 p-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
               <p className="text-sm font-semibold text-slate-900">{customization.productName}</p>
               <p className="text-xs text-slate-500">Prezzo base: {formatEuroLabel(customization.unitPriceCents)}</p>
             </div>
 
-            <label className="grid gap-1 text-sm text-slate-600">
-              Quantita
+            <label className="grid gap-1.5 text-sm text-slate-600">
+              Quantità
               <input
                 type="number"
                 min={1}
                 value={customization.quantity}
                 onChange={(event) => setCustomizationQuantity(Number(event.target.value))}
-                className="border border-slate-200 bg-white px-2 py-2 text-sm"
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 shadow-sm transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               />
             </label>
 
-            <label className="grid gap-1 text-sm text-slate-600">
+            <label className="grid gap-1.5 text-sm text-slate-600">
               Note
               <textarea
                 value={customization.notes}
@@ -1477,42 +1727,42 @@ export default function OrdersPage() {
                 }
                 rows={2}
                 placeholder="Es. ben cotta, consegna al citofono..."
-                className="border border-slate-200 bg-white px-2 py-2 text-sm"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               />
             </label>
 
             {canCustomizeIngredients &&
               Array.isArray(customization.baseIngredients) &&
               customization.baseIngredients.length > 0 && (
-              /* Sezione ingredienti base (rimozioni) */
-              <section className="space-y-1 border border-slate-200 bg-slate-50 p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ingredienti base</p>
-                {customization.baseIngredients.map((ingredient) => {
-                  const isRemoved = (customization.modifiers ?? []).some(
-                    (modifier) => modifier.action === "RIMUOVI" && modifier.ingredientId === ingredient.id
-                  );
+                /* Sezione ingredienti base (rimozioni) */
+                <section className="space-y-1 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ingredienti base</p>
+                  {customization.baseIngredients.map((ingredient) => {
+                    const isRemoved = (customization.modifiers ?? []).some(
+                      (modifier) => modifier.action === "RIMUOVI" && modifier.ingredientId === ingredient.id
+                    );
 
-                  return (
-                    <label key={ingredient.id} className="flex items-center justify-between text-sm">
-                      <span className={isRemoved ? "text-slate-400 line-through" : "text-slate-700"}>
-                        {ingredient.name}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={!isRemoved}
-                        onChange={(event) =>
-                          setCustomizationIngredientRemoved(ingredient, !event.target.checked)
-                        }
-                      />
-                    </label>
-                  );
-                })}
-              </section>
-            )}
+                    return (
+                      <label key={ingredient.id} className="flex items-center justify-between text-sm">
+                        <span className={isRemoved ? "text-slate-400 line-through" : "text-slate-700"}>
+                          {ingredient.name}
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={!isRemoved}
+                          onChange={(event) =>
+                            setCustomizationIngredientRemoved(ingredient, !event.target.checked)
+                          }
+                        />
+                      </label>
+                    );
+                  })}
+                </section>
+              )}
 
             {canCustomizeIngredients && (
               /* Sezione extra ingredienti (aggiunte) */
-              <section className="space-y-1 border border-slate-200 bg-slate-50 p-3">
+              <section className="space-y-1 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Extra ingredienti</p>
                 <div className="flex flex-wrap gap-1">
                   {ingredients
@@ -1532,7 +1782,7 @@ export default function OrdersPage() {
                             key={ingredient.id}
                             type="button"
                             onClick={() => removeCustomizationExtraIngredient(ingredient.id)}
-                            className="border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700"
+                            className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700"
                           >
                             {ingredient.name} +{formatEuroLabel(ingredient.extraPriceCents)}
                           </button>
@@ -1544,7 +1794,7 @@ export default function OrdersPage() {
                           key={ingredient.id}
                           type="button"
                           onClick={() => addCustomizationExtraIngredient(ingredient.id)}
-                          className="border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700"
+                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700"
                         >
                           + {ingredient.name}
                         </button>
@@ -1575,11 +1825,11 @@ export default function OrdersPage() {
             </div>
 
             {/* Azioni modal */}
-            <div className="flex justify-end gap-2 border-t border-slate-200 pt-3">
+            <div className="mt-1 flex justify-end gap-2 border-t border-slate-200 pt-4">
               <button
                 type="button"
                 onClick={closeCustomizationModal}
-                className="border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                className="ui-btn ui-btn-neutral px-3 py-2 text-sm"
               >
                 Annulla
               </button>
@@ -1604,8 +1854,8 @@ export default function OrdersPage() {
             setIsCustomerModalOpen(false);
           }}
         >
-          <form className="grid gap-3" onSubmit={handleCreateCustomer}>
-            <label className="grid gap-1 text-sm text-slate-600">
+          <form className="grid gap-4" onSubmit={handleCreateCustomer}>
+            <label className="grid gap-1.5 text-sm text-slate-600">
               Nome
               <input
                 required
@@ -1616,7 +1866,7 @@ export default function OrdersPage() {
                     name: event.target.value,
                   }))
                 }
-                className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               />
             </label>
 
@@ -1630,11 +1880,12 @@ export default function OrdersPage() {
                     isTemporary: event.target.checked,
                   }))
                 }
+                className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 transition-colors"
               />
               Cliente temporaneo (salvato solo per la giornata corrente)
             </label>
 
-            <label className="grid gap-1 text-sm text-slate-600">
+            <label className="grid gap-1.5 text-sm text-slate-600">
               Telefono
               <input
                 value={customerForm.phone}
@@ -1644,14 +1895,14 @@ export default function OrdersPage() {
                     phone: event.target.value,
                   }))
                 }
-                className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               />
               {customerForm.phone.trim() && !isValidPhoneNumber(customerForm.phone) && (
                 <span className="text-xs text-rose-600">Numero di telefono non valido</span>
               )}
             </label>
 
-            <label className="grid gap-1 text-sm text-slate-600">
+            <label className="grid gap-1.5 text-sm text-slate-600">
               Indirizzo
               <input
                 value={customerForm.address}
@@ -1661,11 +1912,11 @@ export default function OrdersPage() {
                     address: event.target.value,
                   }))
                 }
-                className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               />
             </label>
 
-            <label className="grid gap-1 text-sm text-slate-600">
+            <label className="grid gap-1.5 text-sm text-slate-600">
               Note
               <textarea
                 value={customerForm.notes}
@@ -1676,7 +1927,7 @@ export default function OrdersPage() {
                   }))
                 }
                 rows={3}
-                className="border border-slate-200 bg-slate-50 px-2 py-2 text-sm"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               />
             </label>
 
@@ -1698,7 +1949,7 @@ export default function OrdersPage() {
                   setIsCustomerDeleteConfirmOpen(false);
                   setIsCustomerModalOpen(false);
                 }}
-                className="border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                className="ui-btn ui-btn-neutral px-3 py-2 text-sm"
               >
                 Annulla
               </button>
@@ -1717,7 +1968,7 @@ export default function OrdersPage() {
           </form>
 
           {isCustomerDeleteConfirmOpen && customerModalMode === "edit" && (
-            <div className="mt-3 border border-rose-200 bg-rose-50 p-3">
+            <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 p-3">
               <p className="text-sm text-rose-800">
                 Confermi eliminazione cliente {customerForm.name || "selezionato"}?
               </p>
@@ -1726,7 +1977,7 @@ export default function OrdersPage() {
                   type="button"
                   onClick={closeCustomerDeleteConfirm}
                   disabled={customerSubmitting}
-                  className="border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                  className="ui-btn ui-btn-neutral px-3 py-2 text-sm"
                 >
                   Torna indietro
                 </button>
@@ -1758,7 +2009,7 @@ export default function OrdersPage() {
               <button
                 type="button"
                 onClick={closeStatusChangeModal}
-                className="border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                className="ui-btn ui-btn-neutral px-3 py-2 text-sm"
               >
                 Torna indietro
               </button>
@@ -1774,88 +2025,206 @@ export default function OrdersPage() {
         </Modal>
       )}
 
+      {deleteOrderRequest && (
+        <Modal
+          title="Conferma eliminazione ordine"
+          onClose={closeDeleteOrderConfirm}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-slate-700">
+              Confermi l&apos;eliminazione dell&apos;ordine #{deleteOrderRequest.dailyNumber}?
+            </p>
+
+            <div className="flex justify-end gap-2 border-t border-slate-200 pt-3">
+              <button
+                type="button"
+                onClick={closeDeleteOrderConfirm}
+                disabled={Boolean(deletingOrderId)}
+                className="ui-btn ui-btn-neutral px-3 py-2 text-sm"
+              >
+                Torna indietro
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteOrder}
+                disabled={Boolean(deletingOrderId)}
+                className="ui-btn ui-btn-danger px-3 py-2 text-sm"
+              >
+                {deletingOrderId ? "Eliminazione..." : "Elimina ordine"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Sezione inferiore: storico/lista ordini */}
-      <section className="space-y-3 p-3">
-        {/* Header lista ordini con azione reload */}
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Lista ordini</h3>
-          <button type="button" onClick={() => reload()} className="text-sm font-medium text-slate-700">
-            Ricarica
-          </button>
-        </div>
+      {activeView === "list" && (
+        <section className="ui-surface space-y-4 p-4 sm:p-5">
+          {/* Header lista ordini con azione reload */}
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Lista ordini</h3>
+            <button
+              type="button"
+              onClick={() => reload()}
+              className="ui-btn ui-btn-neutral inline-flex items-center gap-2 px-3 py-2 text-sm text-slate-600"
+            >
+              <RefreshCw size={14} />
+              Ricarica
+            </button>
+          </div>
 
-        {loading && <p className="text-sm text-slate-500">Caricamento ordini...</p>}
+          <div className="grid gap-3 md:grid-cols-[1fr_auto_auto_auto]">
+            <div className="relative">
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={listCustomerFilter}
+                onChange={(event) => setListCustomerFilter(event.target.value)}
+                placeholder="Filtra per nome cliente..."
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-800 shadow-sm transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              />
+            </div>
 
-        {!loading && orders.length === 0 && <p className="text-sm text-slate-500">Nessun ordine disponibile.</p>}
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1">
+              {[
+                { key: "ALL", label: "Tutti" },
+                { key: "ASPORTO", label: "Asporto" },
+                { key: "DOMICILIO", label: "Domicilio" },
+              ].map((typeOption) => (
+                <button
+                  key={typeOption.key}
+                  type="button"
+                  onClick={() => setListTypeFilter(typeOption.key)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${listTypeFilter === typeOption.key
+                      ? "border border-slate-200/60 bg-white text-slate-900 shadow-[0_1px_3px_rgba(0,0,0,0.05)]"
+                      : "text-slate-500 hover:text-slate-700"
+                    }`}
+                >
+                  {typeOption.label}
+                </button>
+              ))}
+            </div>
 
-        {/* Elenco ordini esistenti */}
-        <ul className="space-y-2">
-          {orders.map((order) => (
-            <li key={order.id} className="border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                {/* Colonna info ordine */}
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    #{order.dailyNumber} - {order.type}
-                  </p>
-                  <p className="text-xs text-slate-500">Cliente: {order.customer?.name ?? "Banco"}</p>
-                  <p className="mt-1">
-                    <span className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold ${getStatusBadgeClass(order.status)}`}>
-                      {getStatusLabel(order.status)}
-                    </span>
-                  </p>
-                  <p className="text-xs text-slate-500">Ritiro/Consegna: {formatDateTimeLabel(order.expectedAt)}</p>
+            <div className="relative">
+              <input
+                type="date"
+                value={listDateFilter}
+                onChange={(event) => setListDateFilter(event.target.value)}
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 pr-8 text-xs font-semibold text-slate-700 shadow-sm transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                aria-label="Filtra per data ordine"
+                title="Filtra per data ordine"
+              />
+
+              {listDateFilter && (
+                <button
+                  type="button"
+                  onClick={() => setListDateFilter("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-600"
+                  aria-label="Azzera filtro data"
+                  title="Azzera filtro data"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            <select
+              value={listSortBy}
+              onChange={(event) => setListSortBy(event.target.value)}
+              className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              aria-label="Ordina lista ordini"
+              title="Ordina lista ordini"
+            >
+              <option value="RECENT">Più recenti</option>
+              <option value="OLDEST">Più vecchi</option>
+              <option value="CUSTOMER">Cliente A-Z</option>
+            </select>
+          </div>
+
+          {loading && <p className="text-sm text-slate-500">Caricamento ordini...</p>}
+
+          {!loading && orders.length === 0 && <p className="text-sm text-slate-500">Nessun ordine disponibile.</p>}
+          {!loading && orders.length > 0 && filteredOrdersForList.length === 0 && (
+            <p className="text-sm text-slate-500">Nessun ordine trovato con i filtri selezionati.</p>
+          )}
+
+          {/* Elenco ordini esistenti */}
+          <ul className="space-y-3">
+            {filteredOrdersForList.map((order) => (
+              <li key={order.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:shadow-md hover:shadow-slate-200/50">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {/* Colonna info ordine */}
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      Cliente: {order.customer?.name ?? "Banco"}
+                    </p>
+                    <p className="text-xs text-slate-500">#{order.dailyNumber} - {order.type}</p>
+                    <p className="mt-1">
+                      <span className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold ${getStatusBadgeClass(order.status)}`}>
+                        {getStatusLabel(order.status)}
+                      </span>
+                    </p>
+                    <p className="text-xs text-slate-500">Ritiro/Consegna: {formatDateTimeLabel(order.expectedAt)}</p>
+                  </div>
+
+                  {/* Colonna azioni transizione stato */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {ACTIVE_ORDER_STATUSES.has(order.status) && (
+                      <button
+                        type="button"
+                        onClick={() => startEditingOrder(order)}
+                        className="ui-btn ui-btn-accent px-2 py-1 text-xs"
+                        disabled={statusUpdatingOrderId === order.id || deletingOrderId === order.id}
+                      >
+                        Modifica
+                      </button>
+                    )}
+
+                    {getPrimaryNextStatus(order.status) && (
+                      <button
+                        type="button"
+                        onClick={() => handleStatusChange(order.id, getPrimaryNextStatus(order.status))}
+                        disabled={statusUpdatingOrderId === order.id || deletingOrderId === order.id}
+                        className="ui-btn ui-btn-success px-2 py-1 text-xs"
+                      >
+                        {statusUpdatingOrderId === order.id
+                          ? "Aggiornamento..."
+                          : `Avanza a ${getStatusLabel(getPrimaryNextStatus(order.status))}`}
+                      </button>
+                    )}
+
+                    {(NEXT_STATUS_OPTIONS[order.status] ?? [])
+                      .filter((nextStatus) => nextStatus !== getPrimaryNextStatus(order.status))
+                      .map((nextStatus) => (
+                        <button
+                          key={nextStatus}
+                          type="button"
+                          onClick={() => handleStatusChange(order.id, nextStatus)}
+                          disabled={statusUpdatingOrderId === order.id || deletingOrderId === order.id}
+                          className={
+                            nextStatus === "ANNULLATO"
+                              ? "ui-btn ui-btn-danger px-2 py-1 text-xs"
+                              : "ui-btn ui-btn-neutral px-2 py-1 text-xs"
+                          }
+                        >
+                          {getStatusLabel(nextStatus)}
+                        </button>
+                      ))}
+
+                    <button
+                      type="button"
+                      onClick={() => openDeleteOrderConfirm(order.id)}
+                      disabled={statusUpdatingOrderId === order.id || deletingOrderId === order.id}
+                      className="ui-btn ui-btn-danger px-2 py-1 text-xs"
+                    >
+                      {deletingOrderId === order.id ? "Eliminazione..." : "Elimina"}
+                    </button>
+                  </div>
                 </div>
-
-                {/* Colonna azioni transizione stato */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {ACTIVE_ORDER_STATUSES.has(order.status) && (
-                    <button
-                      type="button"
-                      onClick={() => startEditingOrder(order)}
-                      className="ui-btn ui-btn-accent px-2 py-1 text-xs"
-                      disabled={statusUpdatingOrderId === order.id}
-                    >
-                      Modifica
-                    </button>
-                  )}
-
-                  {getPrimaryNextStatus(order.status) && (
-                    <button
-                      type="button"
-                      onClick={() => handleStatusChange(order.id, getPrimaryNextStatus(order.status))}
-                      disabled={statusUpdatingOrderId === order.id}
-                      className="ui-btn ui-btn-success px-2 py-1 text-xs"
-                    >
-                      {statusUpdatingOrderId === order.id
-                        ? "Aggiornamento..."
-                        : `Avanza a ${getStatusLabel(getPrimaryNextStatus(order.status))}`}
-                    </button>
-                  )}
-
-                  {(NEXT_STATUS_OPTIONS[order.status] ?? [])
-                    .filter((nextStatus) => nextStatus !== getPrimaryNextStatus(order.status))
-                    .map((nextStatus) => (
-                    <button
-                      key={nextStatus}
-                      type="button"
-                      onClick={() => handleStatusChange(order.id, nextStatus)}
-                      disabled={statusUpdatingOrderId === order.id}
-                      className={
-                        nextStatus === "ANNULLATO"
-                          ? "ui-btn ui-btn-danger px-2 py-1 text-xs"
-                          : "ui-btn ui-btn-neutral px-2 py-1 text-xs"
-                      }
-                    >
-                      {getStatusLabel(nextStatus)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

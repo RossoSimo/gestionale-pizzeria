@@ -17,6 +17,7 @@ const { createCustomerService } = require("./services/customer.service.cjs");
 const { createProductService } = require("./services/product.service.cjs");
 const { createIngredientService } = require("./services/ingredient.service.cjs");
 const { createAppSettingsService } = require("./services/app-settings.service.cjs");
+const { createCloudHealthService } = require("./services/cloud-health.service.cjs");
 const { getDbClient, disconnectDb } = require("./db/client.cjs");
 
 const isDev = !app.isPackaged;
@@ -57,8 +58,9 @@ app.whenReady().then(() => {
   const productService = createProductService(productRepository);
   const ingredientService = createIngredientService(ingredientRepository);
   const appSettingsService = createAppSettingsService(appSettingsRepository);
+  const cloudHealthService = createCloudHealthService();
 
-  registerAppHandlers(ipcMain, channels, app);
+  registerAppHandlers(ipcMain, channels, app, { cloudHealthService });
   registerOrderHandlers(ipcMain, channels, orderService);
   registerCustomerHandlers(ipcMain, channels, customerService);
   registerProductHandlers(ipcMain, channels, productService);

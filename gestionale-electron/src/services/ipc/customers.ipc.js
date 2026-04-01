@@ -12,6 +12,10 @@ export function updateCustomer(payload) {
   return callBridge("updateCustomer", payload);
 }
 
+export function updateCustomerCoordinates(payload) {
+  return callBridge("updateCustomerCoordinates", payload);
+}
+
 export function deleteCustomer(payload) {
   return callBridge("deleteCustomer", payload);
 }

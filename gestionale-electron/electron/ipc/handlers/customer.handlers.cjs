@@ -57,6 +57,14 @@ function registerCustomerHandlers(ipcMain, channels, customerService) {
       throwNormalizedIpcError(error);
     }
   });
+
+  ipcMain.handle(channels.CUSTOMERS_UPDATE_COORDINATES, async (_event, payload) => {
+    try {
+      return await customerService.updateCustomerCoordinates(payload);
+    } catch (error) {
+      throwNormalizedIpcError(error);
+    }
+  });
 }
 
 module.exports = { registerCustomerHandlers };

@@ -90,6 +90,9 @@ function createBrowserFallbackBridge() {
     updateCustomer: async () => {
       throw createBridgeUnavailableError("updateCustomer");
     },
+    updateCustomerCoordinates: async () => {
+      throw createBridgeUnavailableError("updateCustomerCoordinates");
+    },
     deleteCustomer: async () => {
       throw createBridgeUnavailableError("deleteCustomer");
     },

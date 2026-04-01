@@ -31,6 +31,9 @@ Use these rules for renderer UI changes.
 - Keep searchable list-first management screens: list/table visible by default, forms in modal overlays. Consider using elegant Tab navigation to separate views if a page handles multiple entity types.
 - For order composition, support context actions from catalog cards (right-click customization) and reuse the same modal for cart-item edits.
 - Keep variation summaries visible in cart rows (under product name) so operators can review changes without reopening modals.
+- In Orders UI, keep compose/list switching in the top bar (URL-state friendly) rather than embedding redundant toggles in page body sections.
+- For delivery maps, prefer compact headers with icon controls only; avoid adding extra text actions in map header unless explicitly requested.
+- Delivery map panels should start collapsed by default and expand on demand, especially in dense operator screens.
 
 ## Money display
 - Persist and compute monetary values in integer cents only.

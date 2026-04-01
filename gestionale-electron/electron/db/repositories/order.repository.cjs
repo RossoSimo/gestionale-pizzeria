@@ -26,6 +26,15 @@ function normalizeBusinessDate(rawDate) {
   return date;
 }
 
+function isDailyNumberUniqueConflict(error) {
+  if (!error || error.code !== "P2002") {
+    return false;
+  }
+
+  const message = String(error.message ?? "");
+  return message.includes("businessDate") && message.includes("dailyNumber");
+}
+
 function createOrderRepository(db) {
   if (!db) {
     throw new Error("DB client non inizializzato in createOrderRepository");
@@ -112,55 +121,73 @@ function createOrderRepository(db) {
       const businessDate = normalizeBusinessDate(input.businessDate);
       const expectedAt = input.expectedAt ? new Date(input.expectedAt) : null;
 
-      return db.$transaction(async (tx) => {
-        // `dailyNumber` is generated per business day inside the same transaction.
-        const lastOrder = await tx.order.findFirst({
-          where: {
-            businessDate,
-            deletedAt: null,
-          },
-          orderBy: {
-            dailyNumber: "desc",
-          },
-        });
+      const maxAttempts = 5;
 
-        const nextDailyNumber = (lastOrder?.dailyNumber ?? 0) + 1;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          return await db.$transaction(async (tx) => {
+            // `dailyNumber` must consider also soft-deleted rows because the unique
+            // constraint is on (businessDate, dailyNumber) regardless of deletedAt.
+            const lastOrder = await tx.order.findFirst({
+              where: {
+                businessDate,
+              },
+              orderBy: {
+                dailyNumber: "desc",
+              },
+            });
 
-        return tx.order.create({
-          data: {
-            businessDate,
-            dailyNumber: nextDailyNumber,
-            status: input.status,
-            type: input.type,
-            totalAmountCents: input.totalAmountCents,
-            notes: input.notes ?? null,
-            expectedAt,
-            customerId: input.customerId ?? null,
-            syncStatus: "PENDING",
-            items: {
-              create: input.items.map((item) => ({
-                quantity: item.quantity,
-                unitPriceCents: item.unitPriceCents,
-                notes: item.notes ?? null,
-                productId: item.productId,
+            const nextDailyNumber = (lastOrder?.dailyNumber ?? 0) + 1;
+
+            return tx.order.create({
+              data: {
+                businessDate,
+                dailyNumber: nextDailyNumber,
+                status: input.status,
+                type: input.type,
+                totalAmountCents: input.totalAmountCents,
+                notes: input.notes ?? null,
+                expectedAt,
+                customerId: input.customerId ?? null,
                 syncStatus: "PENDING",
-                modifiers: {
-                  create: (item.modifiers ?? []).map((modifier) => ({
-                    action: modifier.action,
-                    priceAppliedCents: modifier.priceAppliedCents,
-                    ingredientId: modifier.ingredientId,
+                items: {
+                  create: input.items.map((item) => ({
+                    quantity: item.quantity,
+                    unitPriceCents: item.unitPriceCents,
+                    notes: item.notes ?? null,
+                    productId: item.productId,
                     syncStatus: "PENDING",
+                    modifiers: {
+                      create: (item.modifiers ?? []).map((modifier) => ({
+                        action: modifier.action,
+                        priceAppliedCents: modifier.priceAppliedCents,
+                        ingredientId: modifier.ingredientId,
+                        syncStatus: "PENDING",
+                      })),
+                    },
                   })),
                 },
-              })),
-            },
-          },
-          include: {
-            customer: true,
-            items: activeItemsInclude,
-          },
-        });
-      });
+              },
+              include: {
+                customer: true,
+                items: activeItemsInclude,
+              },
+            });
+          });
+        } catch (error) {
+          const shouldRetry = isDailyNumberUniqueConflict(error) && attempt < maxAttempts;
+
+          if (shouldRetry) {
+            continue;
+          }
+
+          throw error;
+        }
+      }
+
+      const error = new Error("Creazione ordine non riuscita dopo piu tentativi");
+      error.code = "ORDER_CREATE_RETRY_EXHAUSTED";
+      throw error;
     },
 
     async update(orderId, input) {

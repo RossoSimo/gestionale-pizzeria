@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import { Calendar, Clock3, Pencil, Search, Trash2, UserPlus, Pizza, Car, RefreshCw, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Calendar, Clock3, Pencil, Search, Trash2, UserPlus, Pizza, Car, RefreshCw, X, Printer, ChevronDown, ArrowRight, Check } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { useCustomers } from "../features/customers/hooks/useCustomers";
 import { useIngredients } from "../features/ingredients/hooks/useIngredients";
 import { useOrders } from "../features/orders/hooks/useOrders";
 import { useProducts } from "../features/products/hooks/useProducts";
 import { useAppSettings } from "../features/settings/hooks/useAppSettings";
 import ToastNotifications, { useToastNotifications } from "../components/common/ToastNotifications";
+import CustomerAddressMap from "../components/orders/CustomerAddressMap";
 import { buildExpectedAtIso, buildTimeSlotsForDate, getTodayDateInputValue } from "../lib/order-slots";
 import { centsToEuro } from "../lib/money";
 import { createCustomer, deleteCustomer, updateCustomer } from "../services/ipc/customers.ipc";
@@ -41,6 +43,7 @@ const STATUS_BADGE_CLASS = {
 const PIZZA_FAMILY_CATEGORY_KEYS = new Set(["PIZZA", "PIZZA_STAGIONALI", "PIZZA_SPECIALI"]);
 const BASE_CATEGORY_ORDER = ["PIZZA", "PIZZA_STAGIONALI", "PIZZA_SPECIALI", "BEVANDA", "ALTRO"];
 const ACTIVE_ORDER_STATUSES = new Set(["IN_ATTESA", "CONFERMATO", "IN_PREPARAZIONE", "PRONTO"]);
+const HALF_AND_HALF_NOTE_PREFIX = "Meta e meta:";
 
 function buildDefaultFormState(businessDate, availableTimeSlots) {
   return {
@@ -50,6 +53,10 @@ function buildDefaultFormState(businessDate, availableTimeSlots) {
     expectedTimeSlot: availableTimeSlots[0] ?? "",
     notes: "",
   };
+}
+
+function getOrdersViewFromSearchParams(searchParams) {
+  return searchParams.get("view") === "list" ? "list" : "compose";
 }
 
 function getCategoryLabel(category, categoryLabels) {
@@ -168,7 +175,8 @@ function computeModifiersPerUnit(modifiers) {
 function isUnmodifiedCartItem(item) {
   const hasNoModifiers = !Array.isArray(item?.modifiers) || item.modifiers.length === 0;
   const hasNoNotes = typeof item?.notes !== "string" || !item.notes.trim();
-  return hasNoModifiers && hasNoNotes;
+  const hasNoHalfAndHalf = !item?.isHalfAndHalf;
+  return hasNoModifiers && hasNoNotes && hasNoHalfAndHalf;
 }
 
 function isPizzaCategory(category) {
@@ -247,6 +255,76 @@ function formatDateTimeLabel(value) {
   });
 }
 
+function buildHalfAndHalfLabel(primaryName, secondaryName) {
+  if (!secondaryName) {
+    return "";
+  }
+
+  return `${HALF_AND_HALF_NOTE_PREFIX} ${primaryName} / ${secondaryName}`;
+}
+
+function buildLineItemNotes({ notes, isHalfAndHalf, primaryName, secondaryName }) {
+  const segments = [];
+  const halfAndHalfLabel = isHalfAndHalf ? buildHalfAndHalfLabel(primaryName, secondaryName) : "";
+
+  if (halfAndHalfLabel) {
+    segments.push(halfAndHalfLabel);
+  }
+
+  if (typeof notes === "string" && notes.trim()) {
+    segments.push(notes.trim());
+  }
+
+  if (segments.length === 0) {
+    return null;
+  }
+
+  return segments.join("\n");
+}
+
+function parseLineItemNotes(rawNotes) {
+  if (typeof rawNotes !== "string" || !rawNotes.trim()) {
+    return {
+      notes: "",
+      isHalfAndHalf: false,
+      secondaryHalfName: "",
+    };
+  }
+
+  const lines = rawNotes
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    return {
+      notes: "",
+      isHalfAndHalf: false,
+      secondaryHalfName: "",
+    };
+  }
+
+  const firstLine = lines[0];
+
+  if (!firstLine.toLowerCase().startsWith(HALF_AND_HALF_NOTE_PREFIX.toLowerCase())) {
+    return {
+      notes: rawNotes,
+      isHalfAndHalf: false,
+      secondaryHalfName: "",
+    };
+  }
+
+  const halfPart = firstLine.slice(HALF_AND_HALF_NOTE_PREFIX.length).trim();
+  const slashIndex = halfPart.indexOf("/");
+  const secondaryHalfName = slashIndex >= 0 ? halfPart.slice(slashIndex + 1).trim() : "";
+
+  return {
+    notes: lines.slice(1).join("\n"),
+    isHalfAndHalf: Boolean(secondaryHalfName),
+    secondaryHalfName,
+  };
+}
+
 function getStatusLabel(status) {
   return STATUS_LABELS[status] ?? status;
 }
@@ -319,11 +397,16 @@ function buildCustomizationState() {
     productId: "",
     productName: "",
     productCategory: "",
+    baseUnitPriceCents: 0,
     unitPriceCents: 0,
     quantity: 1,
     notes: "",
     baseIngredients: [],
     modifiers: [],
+    isHalfAndHalf: false,
+    secondaryHalfProductId: "",
+    secondaryHalfProductName: "",
+    secondaryHalfPriceCents: 0,
   };
 }
 
@@ -356,7 +439,8 @@ function Modal({ title, onClose, children }) {
 }
 
 export default function OrdersPage() {
-  const [activeView, setActiveView] = useState("compose");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeView = useMemo(() => getOrdersViewFromSearchParams(searchParams), [searchParams]);
   const todayDate = useMemo(() => getTodayDateInputValue(), []);
   const { orders, loading, error, reload } = useOrders();
   const { customers, reload: reloadCustomers } = useCustomers();
@@ -372,6 +456,7 @@ export default function OrdersPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [cartItems, setCartItems] = useState([]);
   const [customization, setCustomization] = useState(buildCustomizationState());
+  const [ingredientSearch, setIngredientSearch] = useState("");
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [customerModalMode, setCustomerModalMode] = useState("create");
   const [customerSubmitting, setCustomerSubmitting] = useState(false);
@@ -381,6 +466,7 @@ export default function OrdersPage() {
   const [isCustomerSearchOpen, setIsCustomerSearchOpen] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState("");
   const [statusUpdatingOrderId, setStatusUpdatingOrderId] = useState("");
+  const [isConfirmMenuOpen, setIsConfirmMenuOpen] = useState(false);
   const [listCustomerFilter, setListCustomerFilter] = useState("");
   const [listTypeFilter, setListTypeFilter] = useState("ALL");
   const [listDateFilter, setListDateFilter] = useState(todayDate);
@@ -390,8 +476,17 @@ export default function OrdersPage() {
   const [statusChangeRequest, setStatusChangeRequest] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const customerSearchContainerRef = useRef(null);
   const { toasts, pushToast, dismissToast } = useToastNotifications();
   const categoryLabels = appSettings?.categoryLabels;
+
+  function setOrdersView(nextView) {
+    const safeView = nextView === "list" ? "list" : "compose";
+    const nextParams = new URLSearchParams(searchParams);
+
+    nextParams.set("view", safeView);
+    setSearchParams(nextParams, { replace: true });
+  }
 
   const categoryOrder = useMemo(() => {
     const labelsKeys = Object.keys(categoryLabels ?? {});
@@ -434,6 +529,37 @@ export default function OrdersPage() {
   }, [availableTimeSlots, todayDate]);
 
   const knownCustomers = useMemo(() => buildKnownCustomers(customers), [customers]);
+
+  const filteredExtraIngredients = useMemo(() => {
+    if (!ingredients) return [];
+    
+    // Filtro per escludere gli ingredienti base o se non serve
+    const baseIds = new Set((customization.baseIngredients ?? []).map((b) => b.id));
+    const addedIds = new Set(
+      (customization.modifiers ?? [])
+        .filter((m) => m.action === "AGGIUNGI")
+        .map((m) => m.ingredientId)
+    );
+
+    let extras = ingredients.filter((ing) => !baseIds.has(ing.id));
+
+    // Ricerca
+    const term = normalizeSearchText(ingredientSearch);
+    if (term) {
+      extras = extras.filter((ing) =>
+        normalizeSearchText(ing.name).includes(term)
+      );
+    }
+
+    // Ordinamento: prima gli aggiunti, poi alfabetico
+    return extras.sort((a, b) => {
+      const aAdded = addedIds.has(a.id);
+      const bAdded = addedIds.has(b.id);
+      if (aAdded && !bAdded) return -1;
+      if (!aAdded && bAdded) return 1;
+      return a.name.localeCompare(b.name, "it-IT");
+    });
+  }, [ingredients, customization.baseIngredients, customization.modifiers, ingredientSearch]);
 
   const visibleProducts = useMemo(() => {
     const searchText = normalizeSearchText(searchQuery);
@@ -539,6 +665,148 @@ export default function OrdersPage() {
     return new Map(products.map((product) => [product.id, product]));
   }, [products]);
 
+  const slotStatsByTime = useMemo(() => {
+    const stats = new Map();
+
+    for (const slot of availableTimeSlots) {
+      stats.set(slot, { orders: 0, pizzas: 0, deliveries: 0 });
+    }
+
+    for (const order of orders ?? []) {
+      if (order.status === "ANNULLATO") {
+        continue;
+      }
+
+      const orderDate = extractDateFilterValue(order.businessDate ?? order.expectedAt);
+
+      if (!formData.businessDate || orderDate !== formData.businessDate) {
+        continue;
+      }
+
+      const slot = formatTimeSlotFromIso(order.expectedAt);
+
+      if (!slot || !stats.has(slot)) {
+        continue;
+      }
+
+      const slotStats = stats.get(slot) ?? { orders: 0, pizzas: 0, deliveries: 0 };
+
+      const pizzasCount = (order.items ?? []).reduce((sum, item) => {
+        const product = productById.get(item.productId);
+
+        if (!product || !isPizzaCategory(product.category)) {
+          return sum;
+        }
+
+        const quantity = Number(item.quantity ?? 0);
+        return Number.isFinite(quantity) && quantity > 0 ? sum + quantity : sum;
+      }, 0);
+
+      stats.set(slot, {
+        orders: slotStats.orders + 1,
+        pizzas: slotStats.pizzas + pizzasCount,
+        deliveries: slotStats.deliveries + (order.type === "DOMICILIO" ? 1 : 0),
+      });
+    }
+
+    return stats;
+  }, [availableTimeSlots, formData.businessDate, orders, productById]);
+
+  const deliveryStopsForSelectedSlot = useMemo(() => {
+    if (!formData.businessDate || !formData.expectedTimeSlot) {
+      return [];
+    }
+
+    return (orders ?? [])
+      .filter((order) => {
+        if (!order || order.status === "ANNULLATO" || order.type !== "DOMICILIO") {
+          return false;
+        }
+
+        const orderDate = extractDateFilterValue(order.businessDate ?? order.expectedAt);
+
+        if (orderDate !== formData.businessDate) {
+          return false;
+        }
+
+        const orderTimeSlot = formatTimeSlotFromIso(order.expectedAt);
+        return orderTimeSlot === formData.expectedTimeSlot;
+      })
+      .map((order) => ({
+        id: order.id,
+        customerId: order.customer?.id ?? order.customerId ?? "",
+        customerName: order.customer?.name ?? "Cliente",
+        address: order.customer?.address ?? "",
+        geoLat: order.customer?.geoLat,
+        geoLng: order.customer?.geoLng,
+        dailyNumber: order.dailyNumber,
+      }))
+      .filter((stop) => Boolean(String(stop.address ?? "").trim()));
+  }, [formData.businessDate, formData.expectedTimeSlot, orders]);
+
+  const suggestedCustomerPizzas = useMemo(() => {
+    if (!selectedCustomer?.id) {
+      return [];
+    }
+
+    const quantityByProductId = new Map();
+
+    for (const order of orders ?? []) {
+      const orderCustomerId = order.customerId ?? order.customer?.id;
+
+      if (orderCustomerId !== selectedCustomer.id) {
+        continue;
+      }
+
+      if (order.status === "ANNULLATO") {
+        continue;
+      }
+
+      for (const item of order.items ?? []) {
+        const product = productById.get(item.productId);
+
+        if (!product || !isPizzaCategory(product.category)) {
+          continue;
+        }
+
+        const quantity = Number(item.quantity ?? 0);
+
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          continue;
+        }
+
+        quantityByProductId.set(item.productId, (quantityByProductId.get(item.productId) ?? 0) + quantity);
+      }
+    }
+
+    return Array.from(quantityByProductId.entries())
+      .map(([productId, totalOrderedQuantity]) => {
+        const product = productById.get(productId);
+
+        if (!product) {
+          return null;
+        }
+
+        return {
+          ...product,
+          totalOrderedQuantity,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (b.totalOrderedQuantity !== a.totalOrderedQuantity) {
+          return b.totalOrderedQuantity - a.totalOrderedQuantity;
+        }
+
+        return a.name.localeCompare(b.name, "it-IT");
+      })
+      .slice(0, 6);
+  }, [orders, productById, selectedCustomer]);
+
+  const pizzaProducts = useMemo(() => {
+    return products.filter((product) => isPizzaCategory(product.category));
+  }, [products]);
+
   const ingredientById = useMemo(() => {
     return new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
   }, [ingredients]);
@@ -613,6 +881,30 @@ export default function OrdersPage() {
     setCustomerSearchQuery(formatCustomerSearchLabel(selectedCustomer));
   }, [selectedCustomer]);
 
+  useEffect(() => {
+    if (!isCustomerSearchOpen) {
+      return;
+    }
+
+    function handlePointerOutside(event) {
+      if (!customerSearchContainerRef.current) {
+        return;
+      }
+
+      if (!customerSearchContainerRef.current.contains(event.target)) {
+        setIsCustomerSearchOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerOutside);
+    document.addEventListener("touchstart", handlePointerOutside);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerOutside);
+      document.removeEventListener("touchstart", handlePointerOutside);
+    };
+  }, [isCustomerSearchOpen]);
+
   const canCustomizeIngredients = isPizzaCategory(customization.productCategory);
 
   function addProductToCart(product) {
@@ -642,10 +934,15 @@ export default function OrdersPage() {
           productName: product.name,
           productCategory: product.category,
           quantity: 1,
+          baseUnitPriceCents: product.priceCents,
           unitPriceCents: product.priceCents,
           notes: "",
           baseIngredients,
           modifiers: [],
+          isHalfAndHalf: false,
+          secondaryHalfProductId: "",
+          secondaryHalfProductName: "",
+          secondaryHalfPriceCents: 0,
         },
       ];
     });
@@ -659,11 +956,16 @@ export default function OrdersPage() {
       productId: product.id,
       productName: product.name,
       productCategory: product.category,
+      baseUnitPriceCents: product.priceCents,
       unitPriceCents: product.priceCents,
       quantity: 1,
       notes: "",
       baseIngredients: cloneBaseIngredients(getBaseIngredientsFromProduct(product)),
       modifiers: [],
+      isHalfAndHalf: false,
+      secondaryHalfProductId: "",
+      secondaryHalfProductName: "",
+      secondaryHalfPriceCents: 0,
     });
   }
 
@@ -675,16 +977,22 @@ export default function OrdersPage() {
       productId: item.productId,
       productName: item.productName,
       productCategory: item.productCategory,
+      baseUnitPriceCents: item.baseUnitPriceCents ?? item.unitPriceCents,
       unitPriceCents: item.unitPriceCents,
       quantity: item.quantity,
       notes: item.notes ?? "",
       baseIngredients: cloneBaseIngredients(item.baseIngredients),
       modifiers: cloneModifiers(item.modifiers),
+      isHalfAndHalf: Boolean(item.isHalfAndHalf),
+      secondaryHalfProductId: item.secondaryHalfProductId ?? "",
+      secondaryHalfProductName: item.secondaryHalfProductName ?? "",
+      secondaryHalfPriceCents: item.secondaryHalfPriceCents ?? 0,
     });
   }
 
   function closeCustomizationModal() {
     setCustomization(buildCustomizationState());
+    setIngredientSearch("");
   }
 
   function setCustomizationQuantity(nextQuantity) {
@@ -712,6 +1020,58 @@ export default function OrdersPage() {
         modifiers: [...cleanedModifiers, buildRemoveModifier(ingredient)],
       };
     });
+  }
+
+  function setCustomizationHalfAndHalfEnabled(enabled) {
+    setCustomization((prev) => {
+      if (!enabled) {
+        return {
+          ...prev,
+          isHalfAndHalf: false,
+          secondaryHalfProductId: "",
+          secondaryHalfProductName: "",
+          secondaryHalfPriceCents: 0,
+          unitPriceCents: prev.baseUnitPriceCents,
+        };
+      }
+
+      const fallbackProduct = pizzaProducts.find((product) => product.id !== prev.productId) ?? null;
+      const selectedProduct =
+        pizzaProducts.find((product) => product.id === prev.secondaryHalfProductId) ?? fallbackProduct;
+
+      if (!selectedProduct) {
+        return {
+          ...prev,
+          isHalfAndHalf: true,
+        };
+      }
+
+      return {
+        ...prev,
+        isHalfAndHalf: true,
+        secondaryHalfProductId: selectedProduct.id,
+        secondaryHalfProductName: selectedProduct.name,
+        secondaryHalfPriceCents: selectedProduct.priceCents,
+        // Regola commerciale comune: per la meta e meta si applica il prezzo della pizza piu cara.
+        unitPriceCents: Math.max(prev.baseUnitPriceCents, selectedProduct.priceCents),
+      };
+    });
+  }
+
+  function setCustomizationHalfAndHalfProduct(productId) {
+    const secondaryProduct = pizzaProducts.find((product) => product.id === productId);
+
+    if (!secondaryProduct) {
+      return;
+    }
+
+    setCustomization((prev) => ({
+      ...prev,
+      secondaryHalfProductId: secondaryProduct.id,
+      secondaryHalfProductName: secondaryProduct.name,
+      secondaryHalfPriceCents: secondaryProduct.priceCents,
+      unitPriceCents: Math.max(prev.baseUnitPriceCents, secondaryProduct.priceCents),
+    }));
   }
 
   function addCustomizationExtraIngredient(ingredientId) {
@@ -751,16 +1111,26 @@ export default function OrdersPage() {
       return;
     }
 
+    if (canCustomizeIngredients && customization.isHalfAndHalf && !customization.secondaryHalfProductName) {
+      pushToast("Seleziona la seconda meta della pizza.", "error");
+      return;
+    }
+
     const nextItem = {
       lineItemId: customization.mode === "edit" ? customization.lineItemId : buildLineItemId(),
       productId: customization.productId,
       productName: customization.productName,
       productCategory: customization.productCategory,
+      baseUnitPriceCents: customization.baseUnitPriceCents,
       quantity: customization.quantity,
       unitPriceCents: customization.unitPriceCents,
       notes: customization.notes,
       baseIngredients: cloneBaseIngredients(customization.baseIngredients),
       modifiers: cloneModifiers(customization.modifiers),
+      isHalfAndHalf: customization.isHalfAndHalf,
+      secondaryHalfProductId: customization.secondaryHalfProductId,
+      secondaryHalfProductName: customization.secondaryHalfProductName,
+      secondaryHalfPriceCents: customization.secondaryHalfPriceCents,
     };
 
     if (customization.mode === "add") {
@@ -890,6 +1260,12 @@ export default function OrdersPage() {
   function buildCartItemsFromOrder(order) {
     return (order.items ?? []).map((item) => {
       const product = productById.get(item.productId);
+      const parsedNotes = parseLineItemNotes(item.notes);
+      const secondaryPizzaProduct = pizzaProducts.find(
+        (candidate) =>
+          candidate.id !== item.productId &&
+          normalizeSearchText(candidate.name) === normalizeSearchText(parsedNotes.secondaryHalfName)
+      );
 
       return {
         lineItemId: buildLineItemId(),
@@ -897,8 +1273,9 @@ export default function OrdersPage() {
         productName: product?.name ?? "Prodotto",
         productCategory: product?.category ?? "ALTRO",
         quantity: item.quantity,
+        baseUnitPriceCents: product?.priceCents ?? item.unitPriceCents,
         unitPriceCents: item.unitPriceCents,
-        notes: item.notes ?? "",
+        notes: parsedNotes.notes,
         baseIngredients: cloneBaseIngredients(getBaseIngredientsFromProduct(product)),
         modifiers: (item.modifiers ?? []).map((modifier) => ({
           ingredientId: modifier.ingredientId,
@@ -906,6 +1283,10 @@ export default function OrdersPage() {
           action: modifier.action,
           priceAppliedCents: modifier.priceAppliedCents,
         })),
+        isHalfAndHalf: parsedNotes.isHalfAndHalf,
+        secondaryHalfProductId: secondaryPizzaProduct?.id ?? "",
+        secondaryHalfProductName: secondaryPizzaProduct?.name ?? parsedNotes.secondaryHalfName,
+        secondaryHalfPriceCents: secondaryPizzaProduct?.priceCents ?? 0,
       };
     });
   }
@@ -929,7 +1310,7 @@ export default function OrdersPage() {
       notes: order.notes ?? "",
     });
     setCartItems(buildCartItemsFromOrder(order));
-    setActiveView("compose");
+    setOrdersView("compose");
   }
 
   function cancelEditingOrder() {
@@ -937,8 +1318,11 @@ export default function OrdersPage() {
     resetOrderComposer();
   }
 
-  async function handleSubmitOrder(event) {
-    event.preventDefault();
+  async function submitOrder({ shouldPrint = false } = {}) {
+    if (submitting) {
+      return;
+    }
+
     const wasEditing = Boolean(editingOrderId);
 
     if (cartItems.length === 0) {
@@ -967,6 +1351,8 @@ export default function OrdersPage() {
     setActionError(null);
 
     try {
+      let savedOrder = null;
+
       const payload = {
         type: formData.type,
         customerId: formData.customerId || null,
@@ -978,7 +1364,12 @@ export default function OrdersPage() {
           productId: item.productId,
           quantity: item.quantity,
           unitPriceCents: item.unitPriceCents,
-          notes: item.notes?.trim() ? item.notes.trim() : null,
+          notes: buildLineItemNotes({
+            notes: item.notes,
+            isHalfAndHalf: item.isHalfAndHalf,
+            primaryName: item.productName,
+            secondaryName: item.secondaryHalfProductName,
+          }),
           modifiers: (item.modifiers ?? []).map((modifier) => ({
             ingredientId: modifier.ingredientId,
             action: modifier.action,
@@ -988,12 +1379,19 @@ export default function OrdersPage() {
       };
 
       if (editingOrderId) {
-        await updateOrder({
+        savedOrder = await updateOrder({
           orderId: editingOrderId,
           ...payload,
         });
       } else {
-        await createOrder(payload);
+        savedOrder = await createOrder({
+          ...payload,
+          status: "CONFERMATO",
+        });
+      }
+
+      if (!wasEditing && shouldPrint) {
+        handlePrintOrderPlaceholder(savedOrder);
       }
 
       resetOrderComposer();
@@ -1005,6 +1403,17 @@ export default function OrdersPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleSubmitOrder(event) {
+    event.preventDefault();
+    setIsConfirmMenuOpen(false);
+    void submitOrder({ shouldPrint: !editingOrderId });
+  }
+
+  function handleConfirmOrderAction(shouldPrint) {
+    setIsConfirmMenuOpen(false);
+    void submitOrder({ shouldPrint });
   }
 
   async function executeStatusChange(orderId, nextStatus) {
@@ -1049,6 +1458,16 @@ export default function OrdersPage() {
 
   function closeDeleteOrderConfirm() {
     setDeleteOrderRequest(null);
+  }
+
+  function handlePrintOrderPlaceholder(order) {
+    const orderNumberLabel = order?.dailyNumber ? `#${order.dailyNumber}` : "selezionato";
+
+    pushToast({
+      type: "info",
+      title: `Stampa ordine ${orderNumberLabel}`,
+      description: "Funzionalita in sviluppo. La stampa verra implementata in un prossimo aggiornamento.",
+    });
   }
 
   async function confirmDeleteOrder() {
@@ -1208,35 +1627,8 @@ export default function OrdersPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <ToastNotifications toasts={toasts} onDismiss={dismissToast} />
-
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-bold tracking-tight text-slate-800">Ordini</h2>
-
-        <div className="flex space-x-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
-          <button
-            type="button"
-            onClick={() => setActiveView("compose")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${activeView === "compose"
-                ? "border border-slate-200/60 bg-white text-slate-900 shadow-[0_1px_3px_rgba(0,0,0,0.05)]"
-                : "text-slate-500 hover:text-slate-700"
-              }`}
-          >
-            Crea ordine
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveView("list")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${activeView === "list"
-                ? "border border-slate-200/60 bg-white text-slate-900 shadow-[0_1px_3px_rgba(0,0,0,0.05)]"
-                : "text-slate-500 hover:text-slate-700"
-              }`}
-          >
-            Lista ordinazioni
-          </button>
-        </div>
-      </header>
 
       {/* Blocco principale: composizione nuovo ordine (catalogo + carrello) */}
       {activeView === "compose" && (
@@ -1246,7 +1638,7 @@ export default function OrdersPage() {
             <div className="space-y-4">
               {/* Riga filtri ordine: cliente, tipo, data, orario, ricerca */}
               <section className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4 md:grid-cols-2 xl:grid-cols-3">
-                <div className="relative grid gap-1.5 text-sm text-slate-600">
+                <div ref={customerSearchContainerRef} className="relative grid gap-1.5 text-sm text-slate-600">
                   <span>Cliente</span>
                   <div className="relative">
                     <Search size={14} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -1396,7 +1788,7 @@ export default function OrdersPage() {
                   </div>
                 </div>
 
-                <label className="grid gap-1 text-sm text-slate-600">
+                <label className="flex flex-col gap-1 text-sm text-slate-600">
                   Orario
                   <select
                     value={formData.expectedTimeSlot}
@@ -1406,14 +1798,43 @@ export default function OrdersPage() {
                     className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                   >
                     {availableTimeSlots.length === 0 && <option value="">Nessuno slot disponibile</option>}
-                    {availableTimeSlots.map((slot) => (
-                      <option key={slot} value={slot}>
-                        {slot}
-                      </option>
-                    ))}
+                    {availableTimeSlots.map((slot) => {
+                      const stats = slotStatsByTime.get(slot) ?? { orders: 0, pizzas: 0, deliveries: 0 };
+                      const orderLabel = stats.orders === 1 ? "ordine" : "ordini";
+                      const pizzaLabel = stats.pizzas === 1 ? "pizza" : "pizze";
+                      const deliveryLabel = stats.deliveries === 1 ? "consegna" : "consegne";
+                      const statsParts = [];
+
+                      if (stats.orders !== 0) {
+                        statsParts.push(`${stats.orders} ${orderLabel}`);
+                        statsParts.push(`${stats.pizzas} ${pizzaLabel}`);
+
+                        if (stats.deliveries !== 0) {
+                          statsParts.push(`${stats.deliveries} ${deliveryLabel}`);
+                        }
+                      }
+
+                      return (
+                        <option key={slot} value={slot}>
+                          {statsParts.length > 0 ? `${slot} (${statsParts.join(", ")})` : slot}
+                        </option>
+                      );
+                    })}
                   </select>
                 </label>
               </section>
+
+              {formData.type === "DOMICILIO" && (
+                <CustomerAddressMap
+                  customerName={selectedCustomer?.name}
+                  customerId={selectedCustomer?.id}
+                  address={selectedCustomer?.address}
+                  customerGeoLat={selectedCustomer?.geoLat}
+                  customerGeoLng={selectedCustomer?.geoLng}
+                  deliveryStops={deliveryStopsForSelectedSlot}
+                  selectedTimeSlot={formData.expectedTimeSlot}
+                />
+              )}
 
               {/* Sezione catalogo: categorie e griglia prodotti */}
               <section className="space-y-3">
@@ -1449,6 +1870,30 @@ export default function OrdersPage() {
                     </div>
                   </div>
                 </div>
+
+                {selectedCustomer && suggestedCustomerPizzas.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50/50 px-3 py-1.5 shadow-sm">
+                    <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-emerald-800">I più ordinati:</span>
+                    <ul className="flex flex-wrap gap-1.5">
+                      {suggestedCustomerPizzas.map((product) => (
+                        <li key={`suggestion-${product.id}`}>
+                          <button
+                            type="button"
+                            onClick={() => addProductToCart(product)}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              openCustomizationForProduct(product);
+                            }}
+                            className="max-w-[160px] truncate rounded border border-emerald-200/60 bg-white px-2 py-0.5 text-[10px] font-medium text-emerald-900 shadow-sm transition-colors hover:border-emerald-300 hover:bg-emerald-100"
+                            title={product.name}
+                          >
+                            {product.name}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 {productsLoading && <p className="text-sm text-slate-500">Caricamento prodotti...</p>}
 
@@ -1583,6 +2028,12 @@ export default function OrdersPage() {
                       </button>
                     </div>
 
+                    {item.isHalfAndHalf && item.secondaryHalfProductName && (
+                      <p className="mt-1 text-[11px] font-medium text-amber-700">
+                        {buildHalfAndHalfLabel(item.productName, item.secondaryHalfProductName)}
+                      </p>
+                    )}
+
                     {Array.isArray(item.modifiers) && item.modifiers.length > 0 && (
                       <ul className="mt-1 space-y-0.5 text-[11px] text-slate-500">
                         {item.modifiers.map((modifier, index) => (
@@ -1667,13 +2118,51 @@ export default function OrdersPage() {
                   <span className="text-xl font-bold text-slate-900">{formatEuroLabel(totalAmountCents)}</span>
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={submitting || cartItems.length === 0}
-                  className="ui-btn ui-btn-success w-full px-3 py-2 text-sm"
-                >
-                  {submitting ? "Salvataggio..." : editingOrderId ? "Salva modifiche ordine" : "Conferma ordine"}
-                </button>
+                {editingOrderId ? (
+                  <button
+                    type="submit"
+                    disabled={submitting || cartItems.length === 0}
+                    className="ui-btn ui-btn-success w-full px-3 py-2 text-sm"
+                  >
+                    {submitting ? "Salvataggio..." : "Salva modifiche ordine"}
+                  </button>
+                ) : (
+                  <div className="relative">
+                    <div className="flex w-full overflow-hidden rounded-lg shadow-sm">
+                      <button
+                        type="button"
+                        disabled={submitting || cartItems.length === 0}
+                        onClick={() => handleConfirmOrderAction(true)}
+                        className="ui-btn ui-btn-success flex-1 rounded-none border-0 px-3 py-2 text-sm"
+                      >
+                        {submitting ? "Salvataggio..." : "Conferma ordine e stampa"}
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={submitting || cartItems.length === 0}
+                        onClick={() => setIsConfirmMenuOpen((prev) => !prev)}
+                        className="ui-btn ui-btn-success rounded-none border-0 border-l border-emerald-700/30 px-3 py-2"
+                        aria-label="Mostra opzioni conferma ordine"
+                        title="Opzioni conferma"
+                      >
+                        <ChevronDown size={16} />
+                      </button>
+                    </div>
+
+                    {isConfirmMenuOpen && !(submitting || cartItems.length === 0) && (
+                      <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1 shadow-lg ring-1 ring-black/5">
+                        <button
+                          type="button"
+                          onClick={() => handleConfirmOrderAction(false)}
+                          className="block w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                        >
+                          Conferma senza stampare
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {editingOrderId && (
                   <button
@@ -1704,8 +2193,50 @@ export default function OrdersPage() {
             {/* Header modal: nome prodotto e prezzo base */}
             <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
               <p className="text-sm font-semibold text-slate-900">{customization.productName}</p>
-              <p className="text-xs text-slate-500">Prezzo base: {formatEuroLabel(customization.unitPriceCents)}</p>
+              <p className="text-xs text-slate-500">
+                Prezzo: {formatEuroLabel(customization.unitPriceCents)}
+                {customization.isHalfAndHalf ? " (meta e meta: pizza piu cara)" : ""}
+              </p>
             </div>
+
+            {canCustomizeIngredients && (
+              <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={customization.isHalfAndHalf}
+                    onChange={(event) => setCustomizationHalfAndHalfEnabled(event.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  Pizza meta e meta
+                </label>
+
+                {customization.isHalfAndHalf && (
+                  <div className="grid gap-1.5 text-sm text-slate-600">
+                    <span>Seconda meta</span>
+                    <select
+                      value={customization.secondaryHalfProductId}
+                      onChange={(event) => setCustomizationHalfAndHalfProduct(event.target.value)}
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                    >
+                      <option value="">Seleziona pizza</option>
+                      {pizzaProducts
+                        .filter((product) => product.id !== customization.productId)
+                        .map((product) => (
+                          <option key={product.id} value={product.id}>
+                            {product.name} ({formatEuroLabel(product.priceCents)})
+                          </option>
+                        ))}
+                    </select>
+                    {!customization.secondaryHalfProductId && customization.secondaryHalfProductName && (
+                      <p className="text-xs text-amber-700">
+                        Metà salvata: {customization.secondaryHalfProductName} (non disponibile in catalogo).
+                      </p>
+                    )}
+                  </div>
+                )}
+              </section>
+            )}
 
             <label className="grid gap-1.5 text-sm text-slate-600">
               Quantità
@@ -1735,56 +2266,23 @@ export default function OrdersPage() {
               Array.isArray(customization.baseIngredients) &&
               customization.baseIngredients.length > 0 && (
                 /* Sezione ingredienti base (rimozioni) */
-                <section className="space-y-1 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ingredienti base</p>
-                  {customization.baseIngredients.map((ingredient) => {
-                    const isRemoved = (customization.modifiers ?? []).some(
-                      (modifier) => modifier.action === "RIMUOVI" && modifier.ingredientId === ingredient.id
-                    );
-
-                    return (
-                      <label key={ingredient.id} className="flex items-center justify-between text-sm">
-                        <span className={isRemoved ? "text-slate-400 line-through" : "text-slate-700"}>
-                          {ingredient.name}
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={!isRemoved}
-                          onChange={(event) =>
-                            setCustomizationIngredientRemoved(ingredient, !event.target.checked)
-                          }
-                        />
-                      </label>
-                    );
-                  })}
-                </section>
-              )}
-
-            {canCustomizeIngredients && (
-              /* Sezione extra ingredienti (aggiunte) */
-              <section className="space-y-1 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Extra ingredienti</p>
-                <div className="flex flex-wrap gap-1">
-                  {ingredients
-                    .filter(
-                      (ingredient) =>
-                        !(customization.baseIngredients ?? []).some((base) => base.id === ingredient.id)
-                    )
-                    .map((ingredient) => {
-                      const isAdded = (customization.modifiers ?? []).some(
-                        (modifier) =>
-                          modifier.action === "AGGIUNGI" && modifier.ingredientId === ingredient.id
+                <section className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ingredienti base (clicca per rimuovere)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {customization.baseIngredients.map((ingredient) => {
+                      const isRemoved = (customization.modifiers ?? []).some(
+                        (modifier) => modifier.action === "RIMUOVI" && modifier.ingredientId === ingredient.id
                       );
 
-                      if (isAdded) {
+                      if (isRemoved) {
                         return (
                           <button
                             key={ingredient.id}
                             type="button"
-                            onClick={() => removeCustomizationExtraIngredient(ingredient.id)}
-                            className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700"
+                            onClick={() => setCustomizationIngredientRemoved(ingredient, false)}
+                            className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-sm text-slate-400 line-through transition-colors hover:border-slate-300 hover:text-slate-600"
                           >
-                            {ingredient.name} +{formatEuroLabel(ingredient.extraPriceCents)}
+                            {ingredient.name}
                           </button>
                         );
                       }
@@ -1793,13 +2291,79 @@ export default function OrdersPage() {
                         <button
                           key={ingredient.id}
                           type="button"
-                          onClick={() => addCustomizationExtraIngredient(ingredient.id)}
-                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700"
+                          onClick={() => setCustomizationIngredientRemoved(ingredient, true)}
+                          className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-100"
                         >
-                          + {ingredient.name}
+                          {ingredient.name}
+                          <X size={14} className="opacity-60" />
                         </button>
                       );
                     })}
+                  </div>
+                </section>
+              )}
+
+            {canCustomizeIngredients && (
+              /* Sezione extra ingredienti (aggiunte) */
+              <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Extra ingredienti</p>
+                  <div className="relative max-w-[150px]">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                    <input
+                      type="text"
+                      placeholder="Cerca..."
+                      value={ingredientSearch}
+                      onChange={(e) => setIngredientSearch(e.target.value)}
+                      className="w-full rounded-md border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-xs placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                    {ingredientSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setIngredientSearch("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex max-h-48 flex-wrap content-start gap-2 overflow-y-auto pr-1">
+                  {filteredExtraIngredients.map((ingredient) => {
+                    const isAdded = (customization.modifiers ?? []).some(
+                      (modifier) => modifier.action === "AGGIUNGI" && modifier.ingredientId === ingredient.id
+                    );
+
+                    if (isAdded) {
+                      return (
+                        <button
+                          key={ingredient.id}
+                          type="button"
+                          onClick={() => removeCustomizationExtraIngredient(ingredient.id)}
+                          className="flex items-center gap-1.5 rounded-lg border border-emerald-500 bg-emerald-500 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-600"
+                        >
+                          {ingredient.name} {ingredient.extraPriceCents > 0 && `(+${formatEuroLabel(ingredient.extraPriceCents)})`}
+                          <X size={14} className="opacity-80" />
+                        </button>
+                      );
+                    }
+
+                    return (
+                      <button
+                        key={ingredient.id}
+                        type="button"
+                        onClick={() => addCustomizationExtraIngredient(ingredient.id)}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 transition-colors hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
+                      >
+                        + {ingredient.name} {ingredient.extraPriceCents > 0 && `(+${formatEuroLabel(ingredient.extraPriceCents)})`}
+                      </button>
+                    );
+                  })}
+
+                  {filteredExtraIngredients.length === 0 && (
+                    <p className="text-xs italic text-slate-500">Nessun ingrediente extra trovato.</p>
+                  )}
                 </div>
               </section>
             )}
@@ -2148,33 +2712,45 @@ export default function OrdersPage() {
           )}
 
           {/* Elenco ordini esistenti */}
-          <ul className="space-y-3">
+          <ul className="space-y-2">
             {filteredOrdersForList.map((order) => (
-              <li key={order.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:shadow-md hover:shadow-slate-200/50">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+              <li key={order.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-all hover:shadow-md hover:shadow-slate-200/50">
+                <div className="flex flex-wrap items-start justify-between gap-2">
                   {/* Colonna info ordine */}
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">
-                      Cliente: {order.customer?.name ?? "Banco"}
-                    </p>
-                    <p className="text-xs text-slate-500">#{order.dailyNumber} - {order.type}</p>
-                    <p className="mt-1">
-                      <span className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold ${getStatusBadgeClass(order.status)}`}>
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-semibold text-slate-900">
+                        {order.customer?.name ?? "Banco"}
+                      </p>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                        {order.type === "DOMICILIO" ? <Car size={11} /> : <Pizza size={11} />}
+                        {order.type}
+                      </span>
+                      <span className="text-[11px] font-medium text-slate-500">#{order.dailyNumber}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${getStatusBadgeClass(order.status)}`}>
                         {getStatusLabel(order.status)}
                       </span>
-                    </p>
-                    <p className="text-xs text-slate-500">Ritiro/Consegna: {formatDateTimeLabel(order.expectedAt)}</p>
+                      <span className="inline-flex items-center gap-1 text-[11px] text-slate-500">
+                        <Clock3 size={11} />
+                        {formatDateTimeLabel(order.expectedAt)}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Colonna azioni transizione stato */}
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {ACTIVE_ORDER_STATUSES.has(order.status) && (
                       <button
                         type="button"
                         onClick={() => startEditingOrder(order)}
-                        className="ui-btn ui-btn-accent px-2 py-1 text-xs"
+                        className="ui-btn ui-btn-accent inline-flex items-center gap-1 px-2 py-1 text-[11px]"
                         disabled={statusUpdatingOrderId === order.id || deletingOrderId === order.id}
+                        aria-label="Modifica ordine"
+                        title="Modifica ordine"
                       >
+                        <Pencil size={11} />
                         Modifica
                       </button>
                     )}
@@ -2184,11 +2760,14 @@ export default function OrdersPage() {
                         type="button"
                         onClick={() => handleStatusChange(order.id, getPrimaryNextStatus(order.status))}
                         disabled={statusUpdatingOrderId === order.id || deletingOrderId === order.id}
-                        className="ui-btn ui-btn-success px-2 py-1 text-xs"
+                        className="ui-btn ui-btn-success inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                        aria-label={`Avanza a ${getStatusLabel(getPrimaryNextStatus(order.status))}`}
+                        title={`Avanza a ${getStatusLabel(getPrimaryNextStatus(order.status))}`}
                       >
+                        <ArrowRight size={11} />
                         {statusUpdatingOrderId === order.id
                           ? "Aggiornamento..."
-                          : `Avanza a ${getStatusLabel(getPrimaryNextStatus(order.status))}`}
+                          : getStatusLabel(getPrimaryNextStatus(order.status))}
                       </button>
                     )}
 
@@ -2202,20 +2781,38 @@ export default function OrdersPage() {
                           disabled={statusUpdatingOrderId === order.id || deletingOrderId === order.id}
                           className={
                             nextStatus === "ANNULLATO"
-                              ? "ui-btn ui-btn-danger px-2 py-1 text-xs"
-                              : "ui-btn ui-btn-neutral px-2 py-1 text-xs"
+                              ? "ui-btn ui-btn-danger inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                              : "ui-btn ui-btn-neutral inline-flex items-center gap-1 px-2 py-1 text-[11px]"
                           }
+                          aria-label={getStatusLabel(nextStatus)}
+                          title={getStatusLabel(nextStatus)}
                         >
+                          {nextStatus === "ANNULLATO" ? <X size={11} /> : <Check size={11} />}
                           {getStatusLabel(nextStatus)}
                         </button>
                       ))}
 
                     <button
                       type="button"
+                      onClick={() => handlePrintOrderPlaceholder(order)}
+                      disabled={statusUpdatingOrderId === order.id || deletingOrderId === order.id}
+                      className="ui-btn ui-btn-neutral inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                      aria-label="Stampa ordine"
+                      title="Stampa ordine"
+                    >
+                      <Printer size={11} />
+                      Stampa
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => openDeleteOrderConfirm(order.id)}
                       disabled={statusUpdatingOrderId === order.id || deletingOrderId === order.id}
-                      className="ui-btn ui-btn-danger px-2 py-1 text-xs"
+                      className="ui-btn ui-btn-danger inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                      aria-label="Elimina ordine"
+                      title="Elimina ordine"
                     >
+                      <Trash2 size={11} />
                       {deletingOrderId === order.id ? "Eliminazione..." : "Elimina"}
                     </button>
                   </div>

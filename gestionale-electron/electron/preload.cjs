@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   listCustomers: (filters) => ipcRenderer.invoke(channels.CUSTOMERS_LIST, filters),
   createCustomer: (payload) => ipcRenderer.invoke(channels.CUSTOMERS_CREATE, payload),
   updateCustomer: (payload) => ipcRenderer.invoke(channels.CUSTOMERS_UPDATE, payload),
+  updateCustomerCoordinates: (payload) => ipcRenderer.invoke(channels.CUSTOMERS_UPDATE_COORDINATES, payload),
   deleteCustomer: (payload) => ipcRenderer.invoke(channels.CUSTOMERS_DELETE, payload),
   listProducts: (filters) => ipcRenderer.invoke(channels.PRODUCTS_LIST, filters),
   createProduct: (payload) => ipcRenderer.invoke(channels.PRODUCTS_CREATE, payload),

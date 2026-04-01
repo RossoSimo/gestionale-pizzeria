@@ -55,6 +55,9 @@ model Customer {
   //surname   String
   phone     String?
   address   String?
+  geoLat    Float?
+  geoLng    Float?
+  geoCachedAt DateTime?
   notes     String?   // Es: "Citofono rotto", "Cane cattivo"
   isTemporary Boolean  @default(false)
   temporaryBusinessDate DateTime?

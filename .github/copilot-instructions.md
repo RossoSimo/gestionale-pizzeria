@@ -78,6 +78,13 @@ Use this structure as the default unless explicitly asked otherwise:
 6. Settings page must support category administration (add/edit/remove custom categories) while preserving the base categories (`PIZZA`, `BEVANDA`, `ALTRO`).
 7. Products and Orders UIs must consume categories dynamically from settings; avoid hard-coded category option lists in renderer logic.
 8. Cart category counters should render only categories with quantity greater than zero.
+9. Orders created from the gestionale must default to `CONFERMATO` status unless the user explicitly chooses another status.
+10. Delivery map visibility must be contextual: render map features only for delivery (`DOMICILIO`) flows, not for pickup-only contexts.
+11. Delivery map should be collapsed by default and remain operationally compact (small icon actions, no redundant header actions unless explicitly requested).
+12. Delivery map stack standard is Google Maps (`@react-google-maps/api`) with Google Geocoder; do not reintroduce Leaflet/Nominatim unless explicitly requested.
+13. Geocoding must prefer persisted customer coordinates (`geoLat`, `geoLng`, `geoCachedAt`) first; write back newly resolved coordinates through IPC in background.
+14. Candidate geocoding ranking must prioritize in-zone municipalities/locality aliases and reject outlier results by distance guards.
+15. Top bar should host cross-page operational controls (for example order compose/list toggle), cloud connectivity status, and a notification dropdown with single-dismiss and clear-all actions.
 
 # IPC Conventions
 

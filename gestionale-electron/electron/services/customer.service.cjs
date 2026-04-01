@@ -72,6 +72,20 @@ function createCustomerService(customerRepository) {
     };
   }
 
+  function normalizeOptionalCoordinate(value, field) {
+    if (value == null || value === "") {
+      return null;
+    }
+
+    const normalized = Number(value);
+
+    if (!Number.isFinite(normalized)) {
+      throw buildValidationError(`Campo non valido: ${field}`, { field });
+    }
+
+    return normalized;
+  }
+
   return {
     async listCustomers(filters = {}) {
       const mappedFilters = {
@@ -108,6 +122,24 @@ function createCustomerService(customerRepository) {
 
       ensureString(payload.id, "id");
       return customerRepository.softDelete(payload.id.trim());
+    },
+
+    async updateCustomerCoordinates(payload) {
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw buildValidationError("Payload coordinate cliente non valido");
+      }
+
+      ensureString(payload.id, "id");
+      const geoLat = normalizeOptionalCoordinate(payload.geoLat, "geoLat");
+      const geoLng = normalizeOptionalCoordinate(payload.geoLng, "geoLng");
+
+      if (geoLat == null || geoLng == null) {
+        throw buildValidationError("Coordinate cliente non valide", {
+          field: "geoLat,geoLng",
+        });
+      }
+
+      return customerRepository.updateCoordinates(payload.id.trim(), { geoLat, geoLng });
     },
   };
 }

@@ -149,6 +149,23 @@ function createCustomerRepository(db) {
       });
     },
 
+    async updateCoordinates(customerId, input) {
+      return db.customer.update({
+        where: {
+          id: customerId,
+        },
+        data: {
+          geoLat: input.geoLat,
+          geoLng: input.geoLng,
+          geoCachedAt: new Date(),
+          version: {
+            increment: 1,
+          },
+          syncStatus: "PENDING",
+        },
+      });
+    },
+
     async softDelete(customerId) {
       return db.customer.update({
         where: {

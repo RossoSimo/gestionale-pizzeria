@@ -11,6 +11,7 @@
   "CUSTOMERS_LIST": "customers:list",
   "CUSTOMERS_CREATE": "customers:create",
   "CUSTOMERS_UPDATE": "customers:update",
+  "CUSTOMERS_UPDATE_COORDINATES": "customers:updateCoordinates",
   "CUSTOMERS_DELETE": "customers:delete",
   "PRODUCTS_LIST": "products:list",
   "PRODUCTS_CREATE": "products:create",

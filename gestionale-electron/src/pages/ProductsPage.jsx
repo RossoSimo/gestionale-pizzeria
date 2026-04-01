@@ -377,7 +377,7 @@ export default function ProductsPage() {
       <ToastNotifications toasts={toasts} onDismiss={dismissToast} />
       
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-bold tracking-tight text-slate-800">Menù e Listini</h2>
+        <h2 className="text-2xl font-bold tracking-tight text-slate-800">Listino</h2>
         
         <div className="flex space-x-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
           <button 

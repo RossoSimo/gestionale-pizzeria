@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Bell,
+  ChartColumnBig,
   CheckCircle2,
   ChevronDown,
   ChartNoAxesColumn,
@@ -11,6 +12,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  Users,
   Wifi,
   WifiOff,
   Waves,
@@ -25,6 +27,8 @@ const navBaseClass =
 const navItems = [
   { to: "/", label: "Dashboard", icon: ChartNoAxesColumn, end: true },
   { to: "/orders", label: "Ordini", icon: ClipboardList },
+  { to: "/statistics", label: "Statistiche", icon: ChartColumnBig },
+  { to: "/customers", label: "Clienti", icon: Users },
   { to: "/products", label: "Prodotti", icon: Package },
 ];
 
@@ -38,6 +42,8 @@ function navClassName({ isActive }) {
 function getPageTitle(pathname) {
   if (pathname === "/") return "Dashboard";
   if (pathname.startsWith("/orders")) return "Ordini";
+  if (pathname.startsWith("/statistics")) return "Statistiche";
+  if (pathname.startsWith("/customers")) return "Clienti";
   if (pathname.startsWith("/products")) return "Prodotti";
   if (pathname.startsWith("/settings")) return "Impostazioni";
   return "Gestionale";
@@ -296,7 +302,7 @@ export default function AppLayout() {
           <div className="mt-auto pt-6">
             <NavLink to="/settings" className={navClassName} title={isCollapsed ? "Impostazioni" : undefined}>
               <Settings size={18} className="shrink-0 text-teal-500" />
-              {!isCollapsed && <span>Settings</span>}
+              {!isCollapsed && <span>Impostazioni</span>}
             </NavLink>
           </div>
         </aside>

@@ -5,7 +5,7 @@ import { useAppSettings } from "../features/settings/hooks/useAppSettings";
 import { createIngredient, deleteIngredient, updateIngredient } from "../services/ipc/ingredients.ipc";
 import { createProduct, deleteProduct, updateProduct } from "../services/ipc/products.ipc";
 import ToastNotifications, { useToastNotifications } from "../components/common/ToastNotifications";
-import { Search, Plus, Utensils, Egg, Edit2, Trash2, Tag, RefreshCw, X, Check } from "lucide-react";
+import { Search, Plus, Utensils, Egg, Edit2, Trash2, Tag, RefreshCw, X, Check, Lock, LockOpen } from "lucide-react";
 
 const PIZZA_FAMILY_CATEGORY_KEYS = new Set(["PIZZA", "PIZZA_STAGIONALI", "PIZZA_SPECIALI"]);
 const BASE_CATEGORY_ORDER = ["PIZZA", "PIZZA_STAGIONALI", "PIZZA_SPECIALI", "BEVANDA", "ALTRO"];
@@ -112,6 +112,7 @@ export default function ProductsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [ingredientSubmitting, setIngredientSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const [isEditUnlocked, setIsEditUnlocked] = useState(false);
 
   const isEditing = Boolean(formData.id);
   const isEditingIngredient = Boolean(ingredientForm.id);
@@ -165,6 +166,37 @@ export default function ProductsPage() {
     });
   }, [products, productSearch]);
 
+  const groupedFilteredProducts = useMemo(() => {
+    const groupedMap = new Map();
+
+    for (const product of filteredProducts) {
+      const categoryKey = product.category || "ALTRO";
+
+      if (!groupedMap.has(categoryKey)) {
+        groupedMap.set(categoryKey, []);
+      }
+
+      groupedMap.get(categoryKey).push(product);
+    }
+
+    const knownCategorySet = new Set(categoryOrder);
+    const extraCategories = Array.from(groupedMap.keys())
+      .filter((categoryKey) => !knownCategorySet.has(categoryKey))
+      .sort((a, b) => getCategoryLabel(a, appSettings?.categoryLabels).localeCompare(
+        getCategoryLabel(b, appSettings?.categoryLabels),
+        "it-IT"
+      ));
+
+    const orderedCategories = [...categoryOrder, ...extraCategories];
+
+    return orderedCategories
+      .filter((categoryKey) => groupedMap.has(categoryKey))
+      .map((categoryKey) => ({
+        categoryKey,
+        products: groupedMap.get(categoryKey),
+      }));
+  }, [appSettings?.categoryLabels, categoryOrder, filteredProducts]);
+
   const filteredIngredients = useMemo(() => {
     const search = ingredientSearch.trim().toLowerCase();
 
@@ -203,28 +235,69 @@ export default function ProductsPage() {
     setIngredientForm(buildDefaultIngredientFormState());
   }
 
+  function ensureEditingUnlocked() {
+    if (isEditUnlocked) {
+      return true;
+    }
+
+    pushToast({
+      type: "info",
+      title: "Modifiche bloccate",
+      description: "Clicca 'Sblocca modifiche' per modificare prodotti e ingredienti.",
+    });
+    return false;
+  }
+
+  function handleToggleEditLock() {
+    const nextState = !isEditUnlocked;
+    setIsEditUnlocked(nextState);
+    pushToast({
+      type: "info",
+      title: nextState ? "Modifiche sbloccate" : "Modifiche bloccate",
+      description: nextState
+        ? "Le azioni su prodotti e ingredienti sono abilitate."
+        : "Le azioni su prodotti e ingredienti sono state disabilitate.",
+    });
+  }
+
   function openCreateProductModal() {
-      resetProductForm();
-      setFormData((prev) => ({
-        ...prev,
-        category: categoryOrder[0] ?? "PIZZA",
-      }));
+    if (!ensureEditingUnlocked()) {
+      return;
+    }
+
+    resetProductForm();
+    setFormData((prev) => ({
+      ...prev,
+      category: categoryOrder[0] ?? "PIZZA",
+    }));
     setProductIngredientSearch("");
     setIsProductModalOpen(true);
   }
 
   function openEditProductModal(product) {
+    if (!ensureEditingUnlocked()) {
+      return;
+    }
+
     loadProductInForm(product);
     setProductIngredientSearch("");
     setIsProductModalOpen(true);
   }
 
   function openCreateIngredientModal() {
+    if (!ensureEditingUnlocked()) {
+      return;
+    }
+
     resetIngredientForm();
     setIsIngredientModalOpen(true);
   }
 
   function openEditIngredientModal(ingredient) {
+    if (!ensureEditingUnlocked()) {
+      return;
+    }
+
     setIngredientForm({
       id: ingredient.id,
       name: ingredient.name,
@@ -268,6 +341,10 @@ export default function ProductsPage() {
 
   async function handleCreateProduct(event) {
     event.preventDefault();
+    if (!ensureEditingUnlocked()) {
+      return;
+    }
+
     setSubmitting(true);
     setActionError(null);
 
@@ -304,6 +381,10 @@ export default function ProductsPage() {
 
   async function handleCreateIngredient(event) {
     event.preventDefault();
+    if (!ensureEditingUnlocked()) {
+      return;
+    }
+
     setIngredientSubmitting(true);
     setActionError(null);
 
@@ -337,6 +418,10 @@ export default function ProductsPage() {
   }
 
   async function handleDeleteProduct(productId) {
+    if (!ensureEditingUnlocked()) {
+      return;
+    }
+
     setActionError(null);
 
     try {
@@ -354,6 +439,10 @@ export default function ProductsPage() {
   }
 
   async function handleDeleteIngredient(ingredientId) {
+    if (!ensureEditingUnlocked()) {
+      return;
+    }
+
     setActionError(null);
 
     try {
@@ -377,9 +466,36 @@ export default function ProductsPage() {
       <ToastNotifications toasts={toasts} onDismiss={dismissToast} />
       
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-bold tracking-tight text-slate-800">Listino</h2>
-        
-        <div className="flex space-x-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+        <div className="flex items-center gap-3">
+          <h2 className="text-2xl font-bold tracking-tight text-slate-800">Listino</h2>
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
+              isEditUnlocked
+                ? "border border-emerald-100 bg-emerald-50 text-emerald-700"
+                : "border border-amber-200 bg-amber-50 text-amber-700"
+            }`}
+          >
+            {isEditUnlocked ? <LockOpen size={12} /> : <Lock size={12} />}
+            {isEditUnlocked ? "Modifiche attive" : "Modifiche bloccate"}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={handleToggleEditLock}
+            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              isEditUnlocked
+                ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+            }`}
+            title={isEditUnlocked ? "Blocca modifiche" : "Sblocca modifiche"}
+          >
+            {isEditUnlocked ? <Lock size={16} /> : <LockOpen size={16} />}
+            {isEditUnlocked ? "Blocca modifiche" : "Sblocca modifiche"}
+          </button>
+
+          <div className="flex space-x-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
           <button 
             type="button"
             onClick={() => setActiveTab("products")}
@@ -400,11 +516,17 @@ export default function ProductsPage() {
             <Egg size={16} />
             Ingredienti
           </button>
+          </div>
         </div>
       </header>
 
       {error && <p className="text-sm text-rose-600">{error.message}</p>}
       {actionError && <p className="text-sm text-rose-600">{actionError.message}</p>}
+      {!isEditUnlocked && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
+          Modalita protetta attiva: per evitare tocchi accidentali, le modifiche a prodotti e ingredienti sono bloccate.
+        </div>
+      )}
 
       <main className="ui-surface min-h-[500px]">
         {activeTab === "products" ? (
@@ -429,7 +551,12 @@ export default function ProductsPage() {
                   <RefreshCw size={16} />
                   <span className="hidden sm:inline">Ricarica</span>
                 </button>
-                <button type="button" onClick={openCreateProductModal} className="ui-btn ui-btn-success flex items-center gap-2 px-4 py-2 shadow-sm">
+                <button
+                  type="button"
+                  onClick={openCreateProductModal}
+                  disabled={!isEditUnlocked}
+                  className="ui-btn ui-btn-success flex items-center gap-2 px-4 py-2 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
                   <Plus size={16} />
                   Aggiungi <span className="hidden sm:inline">Prodotto</span>
                 </button>
@@ -440,40 +567,59 @@ export default function ProductsPage() {
             {!loading && filteredProducts.length === 0 && <div className="py-12 text-center text-sm font-medium text-slate-500">Nessun prodotto trovato.</div>}
             
             {!loading && filteredProducts.length > 0 && (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {filteredProducts.map(product => (
-                  <article key={product.id} className="group relative flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-4 transition-all hover:border-slate-300 hover:shadow-md hover:shadow-slate-200/50">
-                    <div>
-                      <div className="flex items-start justify-between gap-2">
-                        <h4 className="font-semibold leading-tight text-slate-900">{product.name}</h4>
-                        <span className="shrink-0 font-bold text-emerald-700">{formatCentsToEuroLabel(product.priceCents)}</span>
-                      </div>
-                      <div className="mt-2 flex w-fit items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                        <Tag size={12} className="text-slate-400" />
-                        {getCategoryLabel(product.category, appSettings?.categoryLabels)}
-                      </div>
-                      {(product.description || (Array.isArray(product.productIngredients) && product.productIngredients.length > 0)) && (
-                        <div className="mt-3 space-y-2 border-t border-slate-100 pt-3 text-sm text-slate-500">
-                          {product.description && <p className="italic">"{product.description}"</p>}
-                          {Array.isArray(product.productIngredients) && product.productIngredients.length > 0 && (
-                            <div className="flex items-start gap-1.5">
-                              <Egg className="mt-0.5 shrink-0 text-slate-400" size={14}/>
-                              <span className="leading-snug">{product.productIngredients.map((link) => ingredientsById.get(link.ingredientId)?.name ?? link.ingredient?.name).filter(Boolean).join(", ")}</span>
+              <div className="space-y-4">
+                {groupedFilteredProducts.map((group) => (
+                  <section key={group.categoryKey} className="space-y-2">
+                    <h4 className="inline-flex w-fit items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      <Tag size={12} className="text-slate-400" />
+                      {getCategoryLabel(group.categoryKey, appSettings?.categoryLabels)}
+                    </h4>
+
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {group.products.map((product) => (
+                        <article key={product.id} className="group relative flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-4 transition-all hover:border-slate-300 hover:shadow-md hover:shadow-slate-200/50">
+                          <div>
+                            <div className="flex items-start justify-between gap-2">
+                              <h4 className="font-semibold leading-tight text-slate-900">{product.name}</h4>
+                              <span className="shrink-0 font-bold text-emerald-700">{formatCentsToEuroLabel(product.priceCents)}</span>
                             </div>
-                          )}
-                        </div>
-                      )}
+                            {(product.description || (Array.isArray(product.productIngredients) && product.productIngredients.length > 0)) && (
+                              <div className="mt-3 space-y-2 border-t border-slate-100 pt-3 text-sm text-slate-500">
+                                {product.description && <p className="italic">"{product.description}"</p>}
+                                {Array.isArray(product.productIngredients) && product.productIngredients.length > 0 && (
+                                  <div className="flex items-start gap-1.5">
+                                    <Egg className="mt-0.5 shrink-0 text-slate-400" size={14} />
+                                    <span className="leading-snug">{product.productIngredients.map((link) => ingredientsById.get(link.ingredientId)?.name ?? link.ingredient?.name).filter(Boolean).join(", ")}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="mt-4 flex items-center justify-end gap-1 border-t border-slate-100 pt-3 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100">
+                            <button
+                              type="button"
+                              onClick={() => openEditProductModal(product)}
+                              disabled={!isEditUnlocked}
+                              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-sky-50 hover:text-sky-600 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              title="Modifica"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProduct(product.id)}
+                              disabled={!isEditUnlocked}
+                              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              title="Elimina"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </article>
+                      ))}
                     </div>
-                    
-                    <div className="mt-4 flex items-center justify-end gap-1 border-t border-slate-100 pt-3 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100">
-                      <button type="button" onClick={() => openEditProductModal(product)} className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-sky-50 hover:text-sky-600 focus:opacity-100" title="Modifica">
-                        <Edit2 size={16} />
-                      </button>
-                      <button type="button" onClick={() => handleDeleteProduct(product.id)} className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 focus:opacity-100" title="Elimina">
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </article>
+                  </section>
                 ))}
               </div>
             )}
@@ -500,7 +646,12 @@ export default function ProductsPage() {
                   <RefreshCw size={16} />
                   <span className="hidden sm:inline">Ricarica</span>
                 </button>
-                <button type="button" onClick={openCreateIngredientModal} className="ui-btn ui-btn-success flex items-center gap-2 px-4 py-2 shadow-sm">
+                <button
+                  type="button"
+                  onClick={openCreateIngredientModal}
+                  disabled={!isEditUnlocked}
+                  className="ui-btn ui-btn-success flex items-center gap-2 px-4 py-2 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
                   <Plus size={16} />
                   Aggiungi <span className="hidden sm:inline">Ingrediente</span>
                 </button>
@@ -542,10 +693,22 @@ export default function ProductsPage() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-end gap-1 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100">
-                              <button type="button" onClick={() => openEditIngredientModal(ing)} className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-sky-50 hover:text-sky-600 focus:opacity-100" title="Modifica">
+                              <button
+                                type="button"
+                                onClick={() => openEditIngredientModal(ing)}
+                                disabled={!isEditUnlocked}
+                                className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-sky-50 hover:text-sky-600 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                title="Modifica"
+                              >
                                 <Edit2 size={16} />
                               </button>
-                              <button type="button" onClick={() => handleDeleteIngredient(ing.id)} className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 focus:opacity-100" title="Elimina">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteIngredient(ing.id)}
+                                disabled={!isEditUnlocked}
+                                className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                title="Elimina"
+                              >
                                 <Trash2 size={16} />
                               </button>
                             </div>

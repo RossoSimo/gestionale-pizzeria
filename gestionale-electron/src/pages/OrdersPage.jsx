@@ -44,6 +44,7 @@ const PIZZA_FAMILY_CATEGORY_KEYS = new Set(["PIZZA", "PIZZA_STAGIONALI", "PIZZA_
 const BASE_CATEGORY_ORDER = ["PIZZA", "PIZZA_STAGIONALI", "PIZZA_SPECIALI", "BEVANDA", "ALTRO"];
 const ACTIVE_ORDER_STATUSES = new Set(["IN_ATTESA", "CONFERMATO", "IN_PREPARAZIONE", "PRONTO"]);
 const HALF_AND_HALF_NOTE_PREFIX = "Meta e meta:";
+const DAY_CLOSE_STORAGE_KEY = "orders.closedBusinessDates.v1";
 
 function buildDefaultFormState(businessDate, availableTimeSlots) {
   return {
@@ -476,6 +477,27 @@ export default function OrdersPage() {
   const [statusChangeRequest, setStatusChangeRequest] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const [isDayCloseModalOpen, setIsDayCloseModalOpen] = useState(false);
+  const [closingDay, setClosingDay] = useState(false);
+  const [reopeningDay, setReopeningDay] = useState(false);
+  const [closedBusinessDates, setClosedBusinessDates] = useState(() => {
+    if (typeof window === "undefined") {
+      return [];
+    }
+
+    try {
+      const rawValue = window.localStorage.getItem(DAY_CLOSE_STORAGE_KEY);
+      const parsed = rawValue ? JSON.parse(rawValue) : [];
+
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      return parsed.filter((item) => typeof item === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item));
+    } catch {
+      return [];
+    }
+  });
   const customerSearchContainerRef = useRef(null);
   const { toasts, pushToast, dismissToast } = useToastNotifications();
   const categoryLabels = appSettings?.categoryLabels;
@@ -485,6 +507,12 @@ export default function OrdersPage() {
     const nextParams = new URLSearchParams(searchParams);
 
     nextParams.set("view", safeView);
+    nextParams.delete("editOrderId");
+
+    if (safeView !== "compose") {
+      nextParams.delete("customerId");
+    }
+
     setSearchParams(nextParams, { replace: true });
   }
 
@@ -872,6 +900,44 @@ export default function OrdersPage() {
     return sorted;
   }, [listCustomerFilter, listDateFilter, listSortBy, listTypeFilter, orders]);
 
+  const closureDateKey = listDateFilter || todayDate;
+
+  const closureOrders = useMemo(() => {
+    return (orders ?? []).filter((order) => {
+      const orderDate = extractDateFilterValue(order.businessDate ?? order.expectedAt);
+      return orderDate === closureDateKey;
+    });
+  }, [closureDateKey, orders]);
+
+  const closureStatusBreakdown = useMemo(() => {
+    const counts = new Map();
+
+    for (const order of closureOrders) {
+      const status = order.status ?? "IN_ATTESA";
+      counts.set(status, (counts.get(status) ?? 0) + 1);
+    }
+
+    return Array.from(counts.entries())
+      .map(([status, count]) => ({ status, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [closureOrders]);
+
+  const closureActiveOrdersCount = useMemo(() => {
+    return closureOrders.filter((order) => ACTIVE_ORDER_STATUSES.has(order.status)).length;
+  }, [closureOrders]);
+
+  const closureRevenueCents = useMemo(() => {
+    return closureOrders
+      .filter((order) => order.status !== "ANNULLATO")
+      .reduce((sum, order) => sum + Number(order.totalAmountCents ?? 0), 0);
+  }, [closureOrders]);
+
+  const closedDateSet = useMemo(() => new Set(closedBusinessDates), [closedBusinessDates]);
+  const isClosureDateAlreadyClosed = closedDateSet.has(closureDateKey);
+  const canConfirmDayClosure =
+    closureOrders.length > 0 && !isClosureDateAlreadyClosed;
+  const canConfirmDayReopen = isClosureDateAlreadyClosed;
+
   useEffect(() => {
     if (!selectedCustomer) {
       setCustomerSearchQuery("");
@@ -880,6 +946,73 @@ export default function OrdersPage() {
 
     setCustomerSearchQuery(formatCustomerSearchLabel(selectedCustomer));
   }, [selectedCustomer]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(DAY_CLOSE_STORAGE_KEY, JSON.stringify(closedBusinessDates));
+    } catch {
+      // Ignore localStorage failures and keep runtime behavior functional.
+    }
+  }, [closedBusinessDates]);
+
+  useEffect(() => {
+    const requestedCustomerId = searchParams.get("customerId");
+
+    if (!requestedCustomerId) {
+      return;
+    }
+
+    setActionError(null);
+    setIsCustomerSearchOpen(false);
+    setFormData((prev) => {
+      if (prev.customerId === requestedCustomerId) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        customerId: requestedCustomerId,
+      };
+    });
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("view", "compose");
+    nextParams.delete("customerId");
+    nextParams.delete("editOrderId");
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const requestedEditOrderId = searchParams.get("editOrderId");
+
+    if (!requestedEditOrderId || loading) {
+      return;
+    }
+
+    const requestedOrder = orders.find((order) => order.id === requestedEditOrderId) ?? null;
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("editOrderId");
+
+    if (!requestedOrder) {
+      setSearchParams(nextParams, { replace: true });
+      pushToast("Ordine richiesto non trovato.", "error");
+      return;
+    }
+
+    if (!ACTIVE_ORDER_STATUSES.has(requestedOrder.status)) {
+      nextParams.set("view", "list");
+      setSearchParams(nextParams, { replace: true });
+      pushToast("L'ordine selezionato non e modificabile.", "error");
+      return;
+    }
+
+    setSearchParams(nextParams, { replace: true });
+    startEditingOrder(requestedOrder);
+  }, [loading, orders, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!isCustomerSearchOpen) {
@@ -1446,6 +1579,79 @@ export default function OrdersPage() {
     setStatusChangeRequest(null);
   }
 
+  function openDayCloseModal() {
+    setIsDayCloseModalOpen(true);
+  }
+
+  function closeDayCloseModal() {
+    if (closingDay || reopeningDay) {
+      return;
+    }
+
+    setIsDayCloseModalOpen(false);
+  }
+
+  async function confirmDayClose() {
+    if (closingDay) {
+      return;
+    }
+
+    if (isClosureDateAlreadyClosed) {
+      pushToast({ type: "info", title: "Giornata gia chiusa" });
+      setIsDayCloseModalOpen(false);
+      return;
+    }
+
+    if (closureOrders.length === 0) {
+      pushToast({
+        type: "info",
+        title: "Nessun ordine",
+        description: "Nessun ordine da chiudere per la data selezionata.",
+      });
+      return;
+    }
+
+    setClosingDay(true);
+
+    try {
+      setClosedBusinessDates((prev) => (prev.includes(closureDateKey) ? prev : [...prev, closureDateKey]));
+      setIsDayCloseModalOpen(false);
+      pushToast({
+        type: "success",
+        title: "Giornata chiusa",
+        description: `${formatDateLabel(closureDateKey)} - Incasso ${formatEuroLabel(closureRevenueCents)}`,
+      });
+    } finally {
+      setClosingDay(false);
+    }
+  }
+
+  async function confirmDayReopen() {
+    if (reopeningDay) {
+      return;
+    }
+
+    if (!isClosureDateAlreadyClosed) {
+      pushToast({ type: "info", title: "Giornata gia aperta" });
+      setIsDayCloseModalOpen(false);
+      return;
+    }
+
+    setReopeningDay(true);
+
+    try {
+      setClosedBusinessDates((prev) => prev.filter((dateKey) => dateKey !== closureDateKey));
+      setIsDayCloseModalOpen(false);
+      pushToast({
+        type: "success",
+        title: "Giornata riaperta",
+        description: `${formatDateLabel(closureDateKey)} e nuovamente operativa.`,
+      });
+    } finally {
+      setReopeningDay(false);
+    }
+  }
+
   function openDeleteOrderConfirm(orderId) {
     const selectedOrder = orders.find((order) => order.id === orderId) ?? null;
 
@@ -1919,9 +2125,6 @@ export default function OrdersPage() {
                           className="group grid w-full gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md hover:shadow-slate-200/50"
                         >
                           <span className="text-sm font-semibold text-slate-900">{product.name}</span>
-                          <span className="w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                            {getCategoryLabel(product.category, categoryLabels)}
-                          </span>
                           {ingredientNames.length > 0 && (
                             <span className="text-xs leading-4 text-slate-500">
                               {ingredientNames.join(", ")}
@@ -1959,9 +2162,6 @@ export default function OrdersPage() {
                                 className="group grid w-full gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md hover:shadow-slate-200/50"
                               >
                                 <span className="text-sm font-semibold text-slate-900">{product.name}</span>
-                                <span className="w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                                  {getCategoryLabel(product.category, categoryLabels)}
-                                </span>
                                 {ingredientNames.length > 0 && (
                                   <span className="text-xs leading-4 text-slate-500">
                                     Ingredienti: {ingredientNames.join(", ")}
@@ -1985,7 +2185,7 @@ export default function OrdersPage() {
             </div>
 
             {/* Colonna destra: riepilogo carrello e conferma ordine */}
-            <aside className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+            <aside className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 xl:sticky xl:top-0 xl:flex xl:h-[calc(100vh-5.5rem)] xl:flex-col">
               {/* Testata carrello con dati sintetici ordine */}
               <div className="mb-3 border-b border-slate-200 pb-3">
                 <div className="flex items-start justify-between gap-3">
@@ -1996,6 +2196,17 @@ export default function OrdersPage() {
                     <p className="text-sm font-semibold text-slate-900">
                       {selectedCustomer ? selectedCustomer.name : "Cliente al banco"}
                     </p>
+                    {selectedCustomer?.phone && (
+                      <p className="text-xs text-slate-500">Tel: {selectedCustomer.phone}</p>
+                    )}
+                    {selectedCustomer?.address && (
+                      <p className="text-xs text-slate-500">Indirizzo: {selectedCustomer.address}</p>
+                    )}
+                    {selectedCustomer?.notes && (
+                      <p className="mt-1 rounded-md bg-white/80 px-2 py-1 text-[11px] text-slate-500">
+                        Note cliente: {selectedCustomer.notes}
+                      </p>
+                    )}
                     <p className="text-xs text-slate-500">{formData.type}</p>
                     <p className="text-xs text-slate-500">Data: {formatDateLabel(formData.businessDate)}</p>
                     <p className="text-xs text-slate-500">Orario: {formData.expectedTimeSlot || "-"}</p>
@@ -2012,7 +2223,7 @@ export default function OrdersPage() {
               </div>
 
               {/* Lista righe carrello */}
-              <ul className="max-h-[560px] space-y-2 overflow-auto pr-1">
+              <ul className="space-y-2 overflow-auto pr-1 xl:min-h-0 xl:flex-1">
                 {cartItems.map((item) => (
                   <li key={item.lineItemId} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between gap-2">
@@ -2621,20 +2832,137 @@ export default function OrdersPage() {
         </Modal>
       )}
 
+      {isDayCloseModalOpen && (
+        <Modal
+          title={isClosureDateAlreadyClosed ? "Riapertura giornata" : "Chiusura giornata"}
+          onClose={closeDayCloseModal}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-slate-700">
+              Data selezionata: <span className="font-semibold">{formatDateLabel(closureDateKey)}</span>
+            </p>
+
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Ordini</p>
+                <p className="text-lg font-bold text-slate-900">{closureOrders.length}</p>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Ordini attivi</p>
+                <p className={`text-lg font-bold ${closureActiveOrdersCount > 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                  {closureActiveOrdersCount}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500">Incasso (senza annullati)</p>
+                <p className="text-lg font-bold text-slate-900">{formatEuroLabel(closureRevenueCents)}</p>
+              </div>
+            </div>
+
+            {closureStatusBreakdown.length > 0 && (
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Stati ordini</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {closureStatusBreakdown.map((item) => (
+                    <span
+                      key={item.status}
+                      className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700"
+                    >
+                      {getStatusLabel(item.status)}: {item.count}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {isClosureDateAlreadyClosed && (
+              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                Questa giornata risulta gia chiusa.
+              </p>
+            )}
+
+            {!isClosureDateAlreadyClosed && closureOrders.length === 0 && (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                Nessun ordine presente per la data selezionata.
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2 border-t border-slate-200 pt-3">
+              <button
+                type="button"
+                onClick={closeDayCloseModal}
+                disabled={closingDay || reopeningDay}
+                className="ui-btn ui-btn-neutral px-3 py-2 text-sm"
+              >
+                Annulla
+              </button>
+              {isClosureDateAlreadyClosed ? (
+                <button
+                  type="button"
+                  onClick={confirmDayReopen}
+                  disabled={!canConfirmDayReopen || reopeningDay}
+                  className="inline-flex items-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {reopeningDay ? "Riapertura..." : "Conferma riapertura"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={confirmDayClose}
+                  disabled={!canConfirmDayClosure || closingDay}
+                  className="ui-btn ui-btn-success px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {closingDay ? "Chiusura..." : "Conferma chiusura"}
+                </button>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Sezione inferiore: storico/lista ordini */}
       {activeView === "list" && (
         <section className="ui-surface space-y-4 p-4 sm:p-5">
           {/* Header lista ordini con azione reload */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Lista ordini</h3>
-            <button
-              type="button"
-              onClick={() => reload()}
-              className="ui-btn ui-btn-neutral inline-flex items-center gap-2 px-3 py-2 text-sm text-slate-600"
-            >
-              <RefreshCw size={14} />
-              Ricarica
-            </button>
+
+            <div className="flex items-center gap-2">
+              {isClosureDateAlreadyClosed && (
+                <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                  Giornata chiusa
+                </span>
+              )}
+
+              {isClosureDateAlreadyClosed ? (
+                <button
+                  type="button"
+                  onClick={openDayCloseModal}
+                  className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100"
+                >
+                  Riapri giornata
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={openDayCloseModal}
+                  className="ui-btn ui-btn-success inline-flex items-center gap-2 px-3 py-2 text-sm"
+                >
+                  Chiusura giornata
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => reload()}
+                className="ui-btn ui-btn-neutral inline-flex items-center gap-2 px-3 py-2 text-sm text-slate-600"
+              >
+                <RefreshCw size={14} />
+                Ricarica
+              </button>
+            </div>
           </div>
 
           <div className="grid gap-3 md:grid-cols-[1fr_auto_auto_auto]">

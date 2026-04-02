@@ -45,6 +45,7 @@ function createOrderRepository(db) {
       deletedAt: null,
     },
     include: {
+      product: true,
       modifiers: {
         where: {
           deletedAt: null,

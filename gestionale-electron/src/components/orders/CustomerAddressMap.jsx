@@ -784,7 +784,7 @@ export default function CustomerAddressMap({
         <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
           {!GOOGLE_MAPS_API_KEY && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              Inserisci la chiave Google Maps in VITE_GOOGLE_MAPS_API_KEY per visualizzare la mappa.
+              Google Maps non disponibile: verifica API key e restrizioni del progetto.
             </div>
           )}
 

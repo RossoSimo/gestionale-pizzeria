@@ -20,5 +20,15 @@
   "INGREDIENTS_LIST": "ingredients:list",
   "INGREDIENTS_CREATE": "ingredients:create",
   "INGREDIENTS_UPDATE": "ingredients:update",
-  "INGREDIENTS_DELETE": "ingredients:delete"
+  "INGREDIENTS_DELETE": "ingredients:delete",
+  "PRINT_SETTINGS_GET": "printSettings:get",
+  "PRINT_SETTINGS_UPDATE": "printSettings:update",
+  "PRINT_SYSTEM_PRINTERS_LIST": "printSystemPrinters:list",
+  "PRINT_QUEUE_STATUS": "printQueue:status",
+  "PRINT_RETRY_FAILED": "print:retryFailed",
+  "PRINT_REPRINT_LAST": "print:reprintLast",
+  "PRINT_ORDER": "print:order",
+  "PRINT_TEST_RECEIPT": "print:testReceipt",
+  "CASH_CLOSURE_CREATE": "cashClosure:create",
+  "CASH_CLOSURE_LIST": "cashClosure:list"
 }

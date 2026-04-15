@@ -7,6 +7,8 @@ const { registerCustomerHandlers } = require("./ipc/handlers/customer.handlers.c
 const { registerProductHandlers } = require("./ipc/handlers/product.handlers.cjs");
 const { registerIngredientHandlers } = require("./ipc/handlers/ingredient.handlers.cjs");
 const { registerAppSettingsHandlers } = require("./ipc/handlers/app-settings.handlers.cjs");
+const { registerPrintHandlers } = require("./ipc/handlers/print.handlers.cjs");
+const { registerCashClosureHandlers } = require("./ipc/handlers/cash-closure.handlers.cjs");
 const { createOrderRepository } = require("./db/repositories/order.repository.cjs");
 const { createCustomerRepository } = require("./db/repositories/customer.repository.cjs");
 const { createProductRepository } = require("./db/repositories/product.repository.cjs");
@@ -18,6 +20,8 @@ const { createProductService } = require("./services/product.service.cjs");
 const { createIngredientService } = require("./services/ingredient.service.cjs");
 const { createAppSettingsService } = require("./services/app-settings.service.cjs");
 const { createCloudHealthService } = require("./services/cloud-health.service.cjs");
+const { createPrintService } = require("./services/print.service.cjs");
+const { createCashClosureService } = require("./services/cash-closure.service.cjs");
 const { getDbClient, disconnectDb } = require("./db/client.cjs");
 
 const isDev = !app.isPackaged;
@@ -59,6 +63,8 @@ app.whenReady().then(() => {
   const ingredientService = createIngredientService(ingredientRepository);
   const appSettingsService = createAppSettingsService(appSettingsRepository);
   const cloudHealthService = createCloudHealthService();
+  const printService = createPrintService({ app, BrowserWindow });
+  const cashClosureService = createCashClosureService({ app });
 
   registerAppHandlers(ipcMain, channels, app, { cloudHealthService });
   registerOrderHandlers(ipcMain, channels, orderService);
@@ -66,6 +72,8 @@ app.whenReady().then(() => {
   registerProductHandlers(ipcMain, channels, productService);
   registerIngredientHandlers(ipcMain, channels, ingredientService);
   registerAppSettingsHandlers(ipcMain, channels, appSettingsService);
+  registerPrintHandlers(ipcMain, channels, printService);
+  registerCashClosureHandlers(ipcMain, channels, cashClosureService);
 
   createMainWindow();
 

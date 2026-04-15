@@ -12,6 +12,7 @@ import { buildExpectedAtIso, buildTimeSlotsForDate, getTodayDateInputValue } fro
 import { centsToEuro } from "../lib/money";
 import { createCustomer, deleteCustomer, updateCustomer } from "../services/ipc/customers.ipc";
 import { createOrder, deleteOrder, updateOrder, updateOrderStatus } from "../services/ipc/orders.ipc";
+import { getPrintSettings, printOrder } from "../services/ipc/print.ipc";
 
 const NEXT_STATUS_OPTIONS = {
   IN_ATTESA: ["CONFERMATO", "IN_PREPARAZIONE", "ANNULLATO"],
@@ -45,6 +46,7 @@ const BASE_CATEGORY_ORDER = ["PIZZA", "PIZZA_STAGIONALI", "PIZZA_SPECIALI", "BEV
 const ACTIVE_ORDER_STATUSES = new Set(["IN_ATTESA", "CONFERMATO", "IN_PREPARAZIONE", "PRONTO"]);
 const HALF_AND_HALF_NOTE_PREFIX = "Meta e meta:";
 const DAY_CLOSE_STORAGE_KEY = "orders.closedBusinessDates.v1";
+const DEFAULT_DELIVERY_FEE_CENTS = 200;
 
 function buildDefaultFormState(businessDate, availableTimeSlots) {
   return {
@@ -477,6 +479,8 @@ export default function OrdersPage() {
   const [statusChangeRequest, setStatusChangeRequest] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const [deliveryFeeCents, setDeliveryFeeCents] = useState(DEFAULT_DELIVERY_FEE_CENTS);
+  const [printingOrderId, setPrintingOrderId] = useState("");
   const [isDayCloseModalOpen, setIsDayCloseModalOpen] = useState(false);
   const [closingDay, setClosingDay] = useState(false);
   const [reopeningDay, setReopeningDay] = useState(false);
@@ -616,12 +620,20 @@ export default function OrdersPage() {
     })).filter((group) => group.items.length > 0);
   }, [categoryOrder, selectedCategory, visibleProducts]);
 
-  const totalAmountCents = useMemo(() => {
+  const itemsSubtotalCents = useMemo(() => {
     return cartItems.reduce((sum, item) => {
       const modifiersPerUnit = computeModifiersPerUnit(item.modifiers);
       return sum + item.quantity * (item.unitPriceCents + modifiersPerUnit);
     }, 0);
   }, [cartItems]);
+
+  const deliveryFeeForCurrentOrderCents = useMemo(() => {
+    return formData.type === "DOMICILIO" ? deliveryFeeCents : 0;
+  }, [deliveryFeeCents, formData.type]);
+
+  const totalAmountCents = useMemo(() => {
+    return itemsSubtotalCents + deliveryFeeForCurrentOrderCents;
+  }, [deliveryFeeForCurrentOrderCents, itemsSubtotalCents]);
 
   const cartCategoryCounters = useMemo(() => {
     return cartItems.reduce((acc, item) => {
@@ -958,6 +970,36 @@ export default function OrdersPage() {
       // Ignore localStorage failures and keep runtime behavior functional.
     }
   }, [closedBusinessDates]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDeliveryFee() {
+      try {
+        const settings = await getPrintSettings();
+
+        if (cancelled) {
+          return;
+        }
+
+        const nextFee = Number.isInteger(settings?.deliveryFeeCents)
+          ? Math.max(0, settings.deliveryFeeCents)
+          : DEFAULT_DELIVERY_FEE_CENTS;
+
+        setDeliveryFeeCents(nextFee);
+      } catch {
+        if (!cancelled) {
+          setDeliveryFeeCents(DEFAULT_DELIVERY_FEE_CENTS);
+        }
+      }
+    }
+
+    void loadDeliveryFee();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const requestedCustomerId = searchParams.get("customerId");
@@ -1412,7 +1454,11 @@ export default function OrdersPage() {
         baseIngredients: cloneBaseIngredients(getBaseIngredientsFromProduct(product)),
         modifiers: (item.modifiers ?? []).map((modifier) => ({
           ingredientId: modifier.ingredientId,
-          ingredientName: ingredientById.get(modifier.ingredientId)?.name ?? "Ingrediente",
+          ingredientName:
+            modifier.ingredientName ??
+            modifier.ingredient?.name ??
+            ingredientById.get(modifier.ingredientId)?.name ??
+            "Ingrediente",
           action: modifier.action,
           priceAppliedCents: modifier.priceAppliedCents,
         })),
@@ -1492,6 +1538,7 @@ export default function OrdersPage() {
         businessDate: formData.businessDate,
         expectedAt,
         notes: formData.notes?.trim() ? formData.notes.trim() : null,
+        deliveryFeeCents: formData.type === "DOMICILIO" ? deliveryFeeForCurrentOrderCents : 0,
         totalAmountCents,
         items: cartItems.map((item) => ({
           productId: item.productId,
@@ -1524,7 +1571,7 @@ export default function OrdersPage() {
       }
 
       if (!wasEditing && shouldPrint) {
-        handlePrintOrderPlaceholder(savedOrder);
+        await handlePrintOrder(savedOrder, { showSuccessToast: false });
       }
 
       resetOrderComposer();
@@ -1666,14 +1713,44 @@ export default function OrdersPage() {
     setDeleteOrderRequest(null);
   }
 
-  function handlePrintOrderPlaceholder(order) {
+  async function handlePrintOrder(order, options = {}) {
+    if (!order || !order.id) {
+      pushToast({
+        type: "error",
+        title: "Ordine non valido",
+        description: "Impossibile avviare la stampa: ordine mancante.",
+      });
+      return false;
+    }
+
+    const showSuccessToast = options.showSuccessToast !== false;
     const orderNumberLabel = order?.dailyNumber ? `#${order.dailyNumber}` : "selezionato";
 
-    pushToast({
-      type: "info",
-      title: `Stampa ordine ${orderNumberLabel}`,
-      description: "Funzionalita in sviluppo. La stampa verra implementata in un prossimo aggiornamento.",
-    });
+    setPrintingOrderId(order.id);
+
+    try {
+      const result = await printOrder({ order });
+
+      if (showSuccessToast) {
+        pushToast({
+          type: "success",
+          title: `Stampa ordine ${orderNumberLabel}`,
+          description: `Inviato a ${result?.target ?? "stampante configurata"}`,
+        });
+      }
+
+      return true;
+    } catch (err) {
+      pushToast({
+        type: "error",
+        title: `Stampa ordine ${orderNumberLabel} fallita`,
+        description: err?.message || "Errore durante la stampa",
+      });
+
+      return false;
+    } finally {
+      setPrintingOrderId("");
+    }
   }
 
   async function confirmDeleteOrder() {
@@ -2249,7 +2326,7 @@ export default function OrdersPage() {
                       <ul className="mt-1 space-y-0.5 text-[11px] text-slate-500">
                         {item.modifiers.map((modifier, index) => (
                           <li key={`${modifier.action}-${modifier.ingredientId}-${index}`}>
-                            {modifier.action === "RIMUOVI" ? "-" : "+"} {modifier.ingredientName} ({formatModifierPriceLabel(modifier.priceAppliedCents)})
+                            {modifier.action === "RIMUOVI" ? "-" : "+"} {modifier.ingredientName} x{item.quantity} ({formatModifierPriceLabel((modifier.priceAppliedCents ?? 0) * item.quantity)})
                           </li>
                         ))}
                       </ul>
@@ -2283,7 +2360,7 @@ export default function OrdersPage() {
                       <div className="text-right">
                         {Array.isArray(item.modifiers) && item.modifiers.length > 0 && (
                           <p className="text-[11px] text-slate-500">
-                            {computeModifiersPerUnit(item.modifiers) > 0 ? `+${formatEuroLabel(computeModifiersPerUnit(item.modifiers))}` : `${formatEuroLabel(computeModifiersPerUnit(item.modifiers))}`}
+                            Variazioni {computeModifiersPerUnit(item.modifiers) > 0 ? `+${formatEuroLabel(item.quantity * computeModifiersPerUnit(item.modifiers))}` : `${formatEuroLabel(item.quantity * computeModifiersPerUnit(item.modifiers))}`}
                           </p>
                         )}
                         <p className="text-sm font-bold text-slate-900">
@@ -2324,9 +2401,25 @@ export default function OrdersPage() {
                   />
                 </label>
 
-                <div className="mb-3 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-600">Totale</span>
-                  <span className="text-xl font-bold text-slate-900">{formatEuroLabel(totalAmountCents)}</span>
+                <div className="mb-3 space-y-1.5">
+                  {formData.type === "DOMICILIO" && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Subtotale prodotti</span>
+                      <span className="font-semibold text-slate-800">{formatEuroLabel(itemsSubtotalCents)}</span>
+                    </div>
+                  )}
+
+                  {formData.type === "DOMICILIO" && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Consegna</span>
+                      <span className="font-semibold text-slate-800">{formatEuroLabel(deliveryFeeForCurrentOrderCents)}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-slate-600">Totale</span>
+                    <span className="text-xl font-bold text-slate-900">{formatEuroLabel(totalAmountCents)}</span>
+                  </div>
                 </div>
 
                 {editingOrderId ? (
@@ -3122,14 +3215,18 @@ export default function OrdersPage() {
 
                     <button
                       type="button"
-                      onClick={() => handlePrintOrderPlaceholder(order)}
-                      disabled={statusUpdatingOrderId === order.id || deletingOrderId === order.id}
+                      onClick={() => void handlePrintOrder(order)}
+                      disabled={
+                        statusUpdatingOrderId === order.id ||
+                        deletingOrderId === order.id ||
+                        printingOrderId === order.id
+                      }
                       className="ui-btn ui-btn-neutral inline-flex items-center gap-1 px-2 py-1 text-[11px]"
                       aria-label="Stampa ordine"
                       title="Stampa ordine"
                     >
                       <Printer size={11} />
-                      Stampa
+                      {printingOrderId === order.id ? "Stampa..." : "Stampa"}
                     </button>
 
                     <button

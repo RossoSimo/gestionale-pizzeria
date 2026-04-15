@@ -55,6 +55,12 @@ function ensureInteger(value, field) {
   }
 }
 
+function ensureNonNegativeInteger(value, field) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw buildValidationError(`Campo non valido: ${field}`, { field });
+  }
+}
+
 function normalizeOptionalNotes(value, field) {
   if (value == null) {
     return null;
@@ -68,9 +74,12 @@ function normalizeOptionalNotes(value, field) {
   return normalizedValue ? normalizedValue : null;
 }
 
-function computeTotalAmountCents(items) {
+function computeTotalAmountCents(items, options = {}) {
+  const orderType = options.type;
+  const deliveryFeeCents = Number.isInteger(options.deliveryFeeCents) ? options.deliveryFeeCents : 0;
+
   // Total is recomputed server-side to prevent trusting client-provided amounts.
-  return items.reduce((orderTotal, item) => {
+  const itemsTotal = items.reduce((orderTotal, item) => {
     const baseAmount = item.quantity * item.unitPriceCents;
     const modifiersPerUnit = (item.modifiers ?? []).reduce(
       (sum, modifier) => sum + modifier.priceAppliedCents,
@@ -80,6 +89,12 @@ function computeTotalAmountCents(items) {
 
     return orderTotal + baseAmount + modifiersAmount;
   }, 0);
+
+  if (orderType === "DOMICILIO") {
+    return itemsTotal + deliveryFeeCents;
+  }
+
+  return itemsTotal;
 }
 
 /**
@@ -124,9 +139,19 @@ function validateCreateOrderInput(input) {
     });
   });
 
+  const normalizedDeliveryFeeCents =
+    input.type === "DOMICILIO"
+      ? (input.deliveryFeeCents == null ? 0 : input.deliveryFeeCents)
+      : 0;
+
+  ensureNonNegativeInteger(normalizedDeliveryFeeCents, "deliveryFeeCents");
+
   ensureInteger(input.totalAmountCents, "totalAmountCents");
 
-  const computedTotal = computeTotalAmountCents(input.items);
+  const computedTotal = computeTotalAmountCents(input.items, {
+    type: input.type,
+    deliveryFeeCents: normalizedDeliveryFeeCents,
+  });
 
   if (input.totalAmountCents !== computedTotal) {
     throw buildValidationError("Totale ordine non coerente con le righe", {
@@ -138,6 +163,7 @@ function validateCreateOrderInput(input) {
 
   return {
     ...input,
+    deliveryFeeCents: normalizedDeliveryFeeCents,
     notes: normalizeOptionalNotes(input.notes, "notes"),
     status: input.status && VALID_ORDER_STATUS.has(input.status) ? input.status : "IN_ATTESA",
   };
@@ -155,6 +181,7 @@ function validateUpdateOrderInput(input) {
     businessDate: validatedInput.businessDate,
     expectedAt: validatedInput.expectedAt,
     notes: validatedInput.notes,
+    deliveryFeeCents: validatedInput.deliveryFeeCents,
     totalAmountCents: validatedInput.totalAmountCents,
     items: validatedInput.items,
   };

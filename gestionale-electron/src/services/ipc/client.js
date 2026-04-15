@@ -114,6 +114,50 @@ function createBrowserFallbackBridge() {
     deleteIngredient: async () => {
       throw createBridgeUnavailableError("deleteIngredient");
     },
+    getPrintSettings: async () => ({
+      mode: "SYSTEM",
+      systemPrinterName: "",
+      ethernetHost: "",
+      ethernetPort: 9100,
+      paperWidthMm: 80,
+      copies: 1,
+      deliveryFeeCents: 200,
+      autoCut: true,
+      headerLine1: "PIZZERIA",
+      headerLine2: "",
+      footerText: "Grazie e buon appetito",
+      templateAsporto: "",
+      templateDomicilioKitchen: "",
+      templateDomicilioDelivery: "",
+      meta: { source: "browser-fallback" },
+    }),
+    updatePrintSettings: async () => {
+      throw createBridgeUnavailableError("updatePrintSettings");
+    },
+    listSystemPrinters: async () => [],
+    getPrintQueueStatus: async () => ({
+      processing: false,
+      activeJobId: null,
+      queuedCount: 0,
+      queuedJobs: [],
+      recentJobs: [],
+    }),
+    retryFailedPrintJob: async () => {
+      throw createBridgeUnavailableError("retryFailedPrintJob");
+    },
+    reprintLastOrder: async () => {
+      throw createBridgeUnavailableError("reprintLastOrder");
+    },
+    listCashClosures: async () => [],
+    createCashClosure: async () => {
+      throw createBridgeUnavailableError("createCashClosure");
+    },
+    printOrder: async () => {
+      throw createBridgeUnavailableError("printOrder");
+    },
+    printTestReceipt: async () => {
+      throw createBridgeUnavailableError("printTestReceipt");
+    },
     getAppVersion: async () => "browser-preview",
     ping: async () => ({ ok: true, mode: "browser-fallback" }),
   };

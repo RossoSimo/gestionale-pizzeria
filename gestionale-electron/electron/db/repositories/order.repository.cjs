@@ -50,6 +50,9 @@ function createOrderRepository(db) {
         where: {
           deletedAt: null,
         },
+        include: {
+          ingredient: true,
+        },
       },
     },
   };

@@ -1,4 +1,4 @@
-import { CalendarClock, Tags } from "lucide-react";
+import { CalendarClock, Printer, ReceiptText, Tags } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
 const settingsSections = [
@@ -13,6 +13,18 @@ const settingsSections = [
     title: "Categorie prodotti",
     description: "Gestione etichette e categorie personalizzate",
     Icon: Tags,
+  },
+  {
+    to: "stampa",
+    title: "Stampa",
+    description: "Configurazione scontrino USB o Ethernet",
+    Icon: Printer,
+  },
+  {
+    to: "cassa",
+    title: "Chiusura cassa",
+    description: "Report turno, storico e export CSV",
+    Icon: ReceiptText,
   },
 ];
 
